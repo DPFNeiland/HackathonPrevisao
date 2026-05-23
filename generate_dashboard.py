@@ -1,1137 +1,711 @@
-"""Generate a self-contained HTML product dashboard for the hackathon pitch.
-Reads existing outputs from stock_policy_product_output/ and produces dashboard.html."""
-
 import json
-import numpy as np
 import pandas as pd
+import numpy as np
+from pathlib import Path
 
-OUT = "stock_policy_product_output"
+OUTPUT_DIR = Path("stock_policy_product_output")
+SIM_CSV = OUTPUT_DIR / "simulation_daily.csv"
+SKU_CSV = OUTPUT_DIR / "sku_metrics.csv"
+METRICS_JSON = OUTPUT_DIR / "overall_metrics.json"
+META_JSON = OUTPUT_DIR / "run_metadata.json"
+TUNE_CSV = OUTPUT_DIR / "tuning_search.csv"
+POLICY_CSV = OUTPUT_DIR / "policy.csv"
 
-sim = pd.read_csv(f"{OUT}/simulation_daily.csv")
-sku_metrics = pd.read_csv(f"{OUT}/sku_metrics.csv")
-overall = json.load(open(f"{OUT}/overall_metrics.json"))
-try:
-    tune = pd.read_csv(f"{OUT}/tuning_search.csv")
-except:
-    tune = None
+OUT_HTML = OUTPUT_DIR / "dashboard.html"
 
-sim['date'] = pd.to_datetime(sim['date'])
-sim['week'] = sim['date'].dt.isocalendar().week.astype(int)
+def load_data():
+    sim = pd.read_csv(SIM_CSV, parse_dates=["date"])
+    sku = pd.read_csv(SKU_CSV)
+    metrics = json.loads(METRICS_JSON.read_text())
+    meta = json.loads(META_JSON.read_text())
+    if TUNE_CSV.exists():
+        tune = pd.read_csv(TUNE_CSV)
+    else:
+        tune = pd.DataFrame()
+    return sim, sku, metrics, meta, tune
 
-# =========================================================
-# 1. PREPARE DATA FOR JAVASCRIPT EMBEDDING
-# =========================================================
+def fmt(v, d=2):
+    if isinstance(v, float):
+        return round(v, d)
+    return v
 
-# 1a. Time series for animation (NEOSORO 1314 as hero)
-hero = sim[(sim['product'] == 18064) & (sim['location'] == 1314)].sort_values('date').copy()
-hero_ts = hero[['date', 'opening_inventory', 'received_qty', 'order_qty', 'ending_inventory',
-                'inventory_position_before_order', 'actual_demand', 'fulfilled_units',
-                'lost_sales_units', 'simulated_stockout_flag', 'actual_balance',
-                'simulated_inventory_value', 'actual_inventory_value']].copy()
-hero_ts['date'] = hero_ts['date'].dt.strftime('%Y-%m-%d')
-hero_ts['date_str'] = hero_ts['date']
-hero_json = hero_ts.to_dict(orient='records')
+def perc(v):
+    return f"{(v*100):.2f}%"
 
-# Also hero from store 841
-hero2 = sim[(sim['product'] == 18064) & (sim['location'] == 841)].sort_values('date').copy()
-hero2_ts = hero2[['date', 'opening_inventory', 'received_qty', 'order_qty', 'ending_inventory',
-                  'inventory_position_before_order', 'actual_demand', 'fulfilled_units',
-                  'lost_sales_units', 'simulated_stockout_flag', 'actual_balance',
-                  'simulated_inventory_value', 'actual_inventory_value']].copy()
-hero2_ts['date'] = hero2_ts['date'].dt.strftime('%Y-%m-%d')
-hero2_ts['date_str'] = hero2_ts['date']
-hero2_json = hero2_ts.to_dict(orient='records')
+def brl(v):
+    return f"R$ {v:,.2f}"
 
-# 1b. SKU metrics table
-sku_json = sku_metrics.to_dict(orient='records')
+def delta_class(v):
+    if v > 0.01:
+        return "neg"
+    elif v < -0.01:
+        return "pos"
+    return "neutral"
 
-# 1c. Weekly demand pattern
-weekly = sim.groupby('week').agg(
-    demand=('actual_demand', 'sum'),
-    forecast=('forecast_demand', 'sum'),
-    lost=('lost_sales_units', 'sum'),
-).reset_index()
-weekly_json = weekly.to_dict(orient='records')
+def build_hero_data(sim):
+    hero1 = sim[sim["product"] == 18064].to_dict("records")
+    hero2 = sim[sim["product"] == 9607].to_dict("records")
+    return json.dumps(hero1, default=str), json.dumps(hero2, default=str)
 
-# 1d. ABC concentration data
-abc = sim.groupby('product').agg(
-    demand=('actual_demand', 'sum'),
-    inv_value=('simulated_inventory_value', 'mean'),
-).reset_index()
-abc = abc.sort_values('demand', ascending=False)
-abc['cum_demand'] = abc['demand'].cumsum() / abc['demand'].sum()
-abc['label'] = abc['product'].map(
-    sim[['product', 'product_name']].drop_duplicates().set_index('product')['product_name'].to_dict()
-)
-abc_json = abc.to_dict(orient='records')
+def build_sku_data(sku):
+    records = sku.to_dict("records")
+    return json.dumps(records, default=str)
 
-# 1e. Grid search data
-if tune is not None:
-    tune_json = tune.to_dict(orient='records')
-else:
-    tune_json = []
+def build_abc_data(sku):
+    abc = sku.groupby("product", as_index=False).agg(
+        demand=("total_actual_demand", "sum"),
+        inv_value=("avg_inventory_value", "sum"),
+        product_name=("product_name", "first"),
+    ).sort_values("demand", ascending=False)
+    total = abc["demand"].sum()
+    abc["cum_demand"] = abc["demand"].cumsum() / total
+    abc["label"] = abc["product_name"].str[:40]
+    return json.dumps(abc.to_dict("records"), default=str)
 
-# 1f. Loja comparison
-loja_metrics = sim.groupby('location').agg(
-    demand=('actual_demand', 'sum'),
-    avg_inv=('simulated_inventory_value', 'mean'),
-    avg_actual_inv=('actual_inventory_value', 'mean'),
-    orders=('ordering_cost', lambda x: (x > 0).sum()),
-    order_cost=('ordering_cost', 'sum'),
-    stockout_days=('simulated_stockout_flag', 'sum'),
-    lost_units=('lost_sales_units', 'sum'),
-).reset_index()
-loja_json = loja_metrics.to_dict(orient='records')
+def build_loja_data(sku):
+    loja = sku.groupby("location", as_index=False).agg(
+        demand=("total_actual_demand", "sum"),
+        avg_inv=("avg_inventory_value", "mean"),
+        avg_actual_inv=("actual_avg_inventory_value", "mean"),
+        orders=("total_orders", "sum"),
+        order_cost=("total_ordering_cost", "sum"),
+        stockout_days=("stockout_days", "sum"),
+        lost_units=("total_lost_sales_units", "sum"),
+    )
+    return json.dumps(loja.to_dict("records"), default=str)
 
-# 1g. Promo vs Non-promo
-promo_impact = sim.groupby('is_promo').agg(
-    demand=('actual_demand', 'sum'),
-    forecast=('forecast_demand', 'sum'),
-    days=('date', 'nunique'),
-    lost=('lost_sales_units', 'sum'),
-).reset_index()
-promo_json = promo_impact.to_dict(orient='records')
+def build_weekly_data(sim):
+    sim["week"] = sim["date"].dt.isocalendar().week.astype(int)
+    weekly = sim.groupby("week", as_index=False).agg(
+        demand=("actual_demand", "sum"),
+        forecast=("forecast_demand", "sum"),
+        lost=("lost_sales_units", "sum"),
+    ).sort_values("week")
+    return json.dumps(weekly.to_dict("records"), default=str)
 
-# 1h. Over/under forecast summary
-sim['fc_error'] = sim['forecast_demand'] - sim['actual_demand']
-over_under = sim.groupby('product').agg(
-    over=('fc_error', lambda x: x.clip(lower=0).sum()),
-    under=('fc_error', lambda x: (-x).clip(lower=0).sum()),
-    actual=('actual_demand', 'sum'),
-).reset_index()
-over_under['label'] = over_under['product'].map(
-    sim[['product', 'product_name']].drop_duplicates().set_index('product')['product_name'].to_dict()
-)
-over_under_json = over_under.to_dict(orient='records')
+def build_promo_data(sim):
+    promo = sim.groupby("is_promo", as_index=False).agg(
+        demand=("actual_demand", "sum"),
+        forecast=("forecast_demand", "sum"),
+        days=("date", "nunique"),
+        lost=("lost_sales_units", "sum"),
+    )
+    return json.dumps(promo.to_dict("records"), default=str)
 
-# 1i. Overall KPIs
-kpi = {
-    'service_level': overall.get('service_level', 0.9994),
-    'actual_service_level': overall.get('actual_service_level', 0.991),
-    'avg_inventory_value': round(overall.get('avg_inventory_value', 169.78), 2),
-    'actual_avg_inventory_value': round(overall.get('actual_avg_inventory_value', 163.27), 2),
-    'total_ordering_cost': round(overall.get('total_ordering_cost', 2629.55), 2),
-    'total_lost_sales_units': int(overall.get('total_lost_sales_units', 3)),
-    'total_lost_sales_value': round(overall.get('total_lost_sales_value', 233.72), 2) if 'total_lost_sales_value' in overall else 233.72,
-    'total_orders': int(sim[sim['order_qty'] > 0].shape[0]),
-    'total_demand': int(sim['actual_demand'].sum()),
-    'total_forecast': int(sim['forecast_demand'].sum()),
-}
+def build_tune_data(tune):
+    if tune.empty:
+        return "[]"
+    top = tune.nsmallest(20, "objective").to_dict("records")
+    return json.dumps(top, default=str)
 
-# 1j. Top products by revenue at risk
-sim['revenue_at_risk'] = sim['actual_demand'] * sim['sales_price']
-rev_risk = sim.groupby(['product', 'location']).agg(
-    revenue=('revenue_at_risk', 'sum'),
-    stockout=('simulated_stockout_flag', 'sum'),
-    product_name=('product_name', 'first'),
-).reset_index()
-rev_risk = rev_risk.sort_values('revenue', ascending=False).head(10)
-rev_risk_json = rev_risk.to_dict(orient='records')
+def build_rev_risk_data(sku):
+    sku = sku.copy()
+    sku["revenue"] = sku["total_actual_demand"] * sku["sales_price"].fillna(0)
+    risk = sku.nlargest(10, "revenue")[
+        ["product", "location", "revenue", "stockout_days", "product_name"]
+    ].to_dict("records")
+    return json.dumps(risk, default=str)
 
-# =========================================================
-# 2. BUILD HTML
-# =========================================================
+def build_daily_timeline(sim):
+    sim = sim.sort_values("date")
+    records = sim.to_dict("records")
+    return json.dumps(records, default=str)
 
-html = f'''<!DOCTYPE html>
+def generate_dashboard():
+    sim, sku, metrics, meta, tune = load_data()
+    hero1, hero2 = build_hero_data(sim)
+    sku_json = build_sku_data(sku)
+    abc_json = build_abc_data(sku)
+    loja_json = build_loja_data(sku)
+    weekly_json = build_weekly_data(sim)
+    promo_json = build_promo_data(sim)
+    tune_json = build_tune_data(tune)
+    rev_json = build_rev_risk_data(sku)
+    timeline_json = build_daily_timeline(sim)
+
+    sl = metrics["service_level"]
+    sl_act = metrics["actual_service_level"]
+    avg_inv = metrics["avg_inventory_value"]
+    avg_inv_act = metrics["actual_avg_inventory_value"]
+    inv_delta = metrics["inventory_value_delta_vs_actual"]
+    cost = metrics["total_ordering_cost"]
+    lost_u = metrics["total_lost_sales_units"]
+    orders = metrics["total_orders"]
+    fc_units = metrics["total_forecast_units"]
+    act_units = metrics["total_actual_units"]
+    z_by_class = meta.get("z_by_class", {})
+    floors = f"reorder={meta.get('empirical_floor_reorder_quantile',0.75)}, up-to={meta.get('empirical_floor_order_up_to_quantile',0.90)}"
+    abc_mode = meta.get("abc_classification", "N/A")
+    review = meta.get("review_days", 7)
+    z_uniform = meta.get("z_uniform", 0.84)
+
+    # Lost sales value
+    lost_value = sum(
+        r["total_lost_sales_units"] * r["sales_price"]
+        for r in sku.to_dict("records")
+        if r.get("total_lost_sales_units", 0) > 0 and pd.notna(r.get("sales_price"))
+    )
+
+    # ABC counts
+    abc_counts = sku["abc_class"].value_counts().to_dict()
+    a_count = abc_counts.get("A", 0)
+    b_count = abc_counts.get("B", 0)
+    c_count = abc_counts.get("C", 0)
+
+    # Per-location metrics
+    loja = sku.groupby("location").agg(
+        sl=("service_level", "mean"),
+        inv=("avg_inventory_value", "mean"),
+        cost=("total_ordering_cost", "sum"),
+        lost=("total_lost_sales_units", "sum"),
+        demand=("total_actual_demand", "sum"),
+    )
+
+    html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Policy Dashboard — Hackathon CDN 2026</title>
+<title>Dashboard — Politica de Estoque Q4/2024</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }}
-
-/* HEADER */
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:'Inter',sans-serif; background:#f0f2f5; color:#1a1a2e; }}
 .header {{
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-    padding: 20px 40px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 3px solid #00d4aa;
+    background: linear-gradient(135deg,#0f0c29,#302b63,#24243e);
+    padding:20px 40px; display:flex; align-items:center; justify-content:space-between;
+    border-bottom:3px solid #00d4aa;
 }}
-.header .logos {{ display: flex; align-items: center; gap: 24px; }}
-.header .logo-group {{ display: flex; align-items: center; gap: 12px; color: #fff; }}
-.header .logo-group .logo-badge {{
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.2);
-    padding: 6px 14px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    color: #fff;
-}}
-.header .logo-group .sep {{ color: rgba(255,255,255,0.3); font-size: 18px; }}
-.header h1 {{ color: #fff; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }}
-.header h1 span {{ color: #00d4aa; }}
-.header .badge {{
-    background: #00d4aa;
-    color: #0f0c29;
-    padding: 6px 16px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}}
+.header h1 {{ color:#fff; font-size:20px; font-weight:700; }}
+.header h1 span {{ color:#00d4aa; }}
+.header .badge {{ background:#00d4aa; color:#0f0c29; padding:6px 16px; border-radius:20px;
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }}
 
-/* NAV */
-.nav {{
-    display: flex;
-    background: #fff;
-    border-bottom: 1px solid #e0e0e0;
-    padding: 0 40px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
-}}
+.nav {{ display:flex; background:#fff; padding:0 40px; box-shadow:0 2px 4px rgba(0,0,0,0.04); border-bottom:1px solid #e0e0e0; flex-wrap:wrap; }}
 .nav button {{
-    padding: 16px 24px;
-    border: none;
-    background: transparent;
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: #666;
-    cursor: pointer;
-    border-bottom: 3px solid transparent;
-    transition: all 0.2s;
+    padding:14px 20px; border:none; background:transparent;
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:500; color:#666;
+    cursor:pointer; border-bottom:3px solid transparent; transition:all 0.2s;
 }}
-.nav button:hover {{ color: #302b63; }}
-.nav button.active {{ color: #302b63; border-bottom-color: #00d4aa; font-weight: 600; }}
+.nav button:hover {{ color:#302b63; }}
+.nav button.active {{ color:#302b63; border-bottom-color:#00d4aa; font-weight:600; }}
 
-/* CONTENT */
-.content {{ padding: 24px 40px; }}
-.page {{ display: none; }}
-.page.active {{ display: block; }}
+.content {{ padding:24px 40px; max-width:1400px; margin:0 auto; }}
+.page {{ display:none; }}
+.page.active {{ display:block; }}
 
-/* KPI CARDS */
-.kpi-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 24px;
-}}
+.kpi-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px; }}
 .kpi-card {{
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    border-left: 4px solid #302b63;
-    transition: transform 0.2s;
+    background:#fff; border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    border-left:4px solid #302b63; transition:transform 0.2s;
 }}
-.kpi-card:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-.kpi-card .label {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 4px; }}
-.kpi-card .value {{ font-size: 28px; font-weight: 700; color: #1a1a2e; }}
-.kpi-card .sub {{ font-size: 13px; color: #888; margin-top: 4px; }}
-.kpi-card .delta {{ font-size: 13px; font-weight: 600; margin-top: 4px; }}
-.kpi-card .delta.pos {{ color: #00b894; }}
-.kpi-card .delta.neg {{ color: #e17055; }}
-.kpi-card .delta.neutral {{ color: #666; }}
-.kpi-card.green {{ border-left-color: #00b894; }}
-.kpi-card.teal {{ border-left-color: #00cec9; }}
-.kpi-card.orange {{ border-left-color: #e17055; }}
-.kpi-card.purple {{ border-left-color: #6c5ce7; }}
-.kpi-card.blue {{ border-left-color: #0984e3; }}
+.kpi-card:hover {{ transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.1); }}
+.kpi-card .label {{ font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:#888; margin-bottom:4px; }}
+.kpi-card .value {{ font-size:26px; font-weight:700; color:#1a1a2e; }}
+.kpi-card .sub {{ font-size:12px; color:#888; margin-top:4px; }}
+.kpi-card .delta {{ font-size:12px; font-weight:600; margin-top:4px; }}
+.kpi-card .delta.pos {{ color:#00b894; }}
+.kpi-card .delta.neg {{ color:#e17055; }}
+.kpi-card.green {{ border-left-color:#00b894; }}
+.kpi-card.teal {{ border-left-color:#00cec9; }}
+.kpi-card.orange {{ border-left-color:#e17055; }}
+.kpi-card.purple {{ border-left-color:#6c5ce7; }}
+.kpi-card.blue {{ border-left-color:#0984e3; }}
 
-/* SECTIONS */
 .section-title {{
-    font-size: 18px;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin: 32px 0 16px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #e0e0e0;
+    font-size:17px; font-weight:700; color:#1a1a2e; margin:28px 0 14px;
+    padding-bottom:8px; border-bottom:2px solid #e0e0e0;
 }}
-.section-title span {{ color: #00d4aa; }}
+.section-title span {{ color:#00d4aa; }}
 
 .chart-container {{
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    margin-bottom: 20px;
+    background:#fff; border-radius:12px; padding:20px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.06); margin-bottom:20px;
 }}
+.two-col {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px; }}
+@media(max-width:900px){{ .two-col{{grid-template-columns:1fr;}} }}
 
-/* TWO COLUMN */
-.two-col {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 20px;
-}}
-@media (max-width: 900px) {{ .two-col {{ grid-template-columns: 1fr; }} }}
-
-/* INSIGHT BOX */
 .insight {{
-    background: linear-gradient(135deg, #0f0c29, #302b63);
-    color: #fff;
-    border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 20px;
+    background: linear-gradient(135deg,#0f0c29,#302b63);
+    color:#fff; border-radius:12px; padding:20px; margin-bottom:20px;
 }}
-.insight h3 {{ color: #00d4aa; font-size: 16px; margin-bottom: 8px; }}
-.insight p {{ font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.85); }}
-.insight .highlight {{ color: #00d4aa; font-weight: 600; }}
+.insight h3 {{ color:#00d4aa; font-size:15px; margin-bottom:8px; }}
+.insight p {{ font-size:13px; line-height:1.6; color:rgba(255,255,255,0.85); }}
 
-/* TABLE */
-.data-table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}}
+.data-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
 .data-table th {{
-    text-align: left;
-    padding: 10px 12px;
-    background: #f8f9fa;
-    font-weight: 600;
-    color: #555;
-    border-bottom: 2px solid #e0e0e0;
-    white-space: nowrap;
+    text-align:left; padding:8px 10px; background:#f8f9fa; font-weight:600;
+    color:#555; border-bottom:2px solid #e0e0e0;
 }}
-.data-table td {{
-    padding: 8px 12px;
-    border-bottom: 1px solid #f0f0f0;
-}}
-.data-table tr:hover {{ background: #f8f9fa; }}
-.data-table .num {{ font-family: 'JetBrains Mono', monospace; text-align: right; }}
-.data-table .badge-sl {{
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-}}
-.badge-sl.high {{ background: #d4edda; color: #155724; }}
-.badge-sl.medium {{ background: #fff3cd; color: #856404; }}
-.badge-sl.low {{ background: #f8d7da; color: #721c24; }}
+.data-table td {{ padding:7px 10px; border-bottom:1px solid #f0f0f0; }}
+.data-table tr:hover {{ background:#f8f9fa; }}
+.data-table .num {{ font-family:'JetBrains Mono',monospace; text-align:right; }}
 
-/* TIMELINE CONTROLS */
-.timeline-controls {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-}}
-.timeline-controls button {{
-    padding: 8px 20px;
-    border: none;
-    border-radius: 8px;
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}}
-.btn-play {{ background: #00d4aa; color: #0f0c29; }}
-.btn-play:hover {{ background: #00bf96; }}
-.btn-pause {{ background: #e17055; color: #fff; }}
-.btn-pause:hover {{ background: #d63031; }}
-.btn-reset {{ background: #dfe6e9; color: #2d3436; }}
-.btn-reset:hover {{ background: #b2bec3; }}
-.timeline-controls select {{
-    padding: 8px 12px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-}}
-.timeline-controls .speed-label {{ font-size: 13px; color: #888; }}
+.badge-sl {{ display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }}
+.badge-sl.A {{ background:#d4edda; color:#155724; }}
+.badge-sl.B {{ background:#fff3cd; color:#856404; }}
+.badge-sl.C {{ background:#f8d7da; color:#721c24; }}
 
-/* METER */
-.meter {{
-    height: 8px;
-    background: #e0e0e0;
-    border-radius: 4px;
-    overflow: hidden;
-    margin: 8px 0;
+.param-grid {{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;
+    margin-bottom:20px;
 }}
-.meter-fill {{
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s;
+.param-card {{
+    background:#fff; border-radius:10px; padding:14px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.06); text-align:center;
 }}
+.param-card .param-label {{ font-size:10px; font-weight:600; color:#888; text-transform:uppercase; }}
+.param-card .param-value {{ font-size:20px; font-weight:700; color:#302b63; margin-top:4px; }}
 
-/* VALUE COMPARISON */
-.val-comp {{
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-}}
-.val-comp .sim {{ font-size: 24px; font-weight: 700; }}
-.val-comp .actual {{ font-size: 16px; color: #888; text-decoration: line-through; }}
-.val-comp .arrow {{ color: #00d4aa; font-size: 20px; }}
-
-/* NARRATIVE CARD */
-.narrative {{
-    background: #fff9e6;
-    border-left: 4px solid #fdcb6e;
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 16px;
-    font-size: 14px;
-    line-height: 1.6;
-}}
-.narrative strong {{ color: #e17055; }}
-
-/* FOOTER */
-.footer {{
-    text-align: center;
-    padding: 24px;
-    color: #888;
-    font-size: 12px;
-    border-top: 1px solid #e0e0e0;
-}}
+.footer {{ text-align:center; padding:16px; color:#888; font-size:11px; border-top:1px solid #e0e0e0; margin-top:40px; }}
 </style>
 </head>
 <body>
-
 <div class="header">
-    <div class="logos">
-        <div class="logo-group">
-            <span class="logo-badge">🏥 CDN</span>
-            <span class="sep">|</span>
-            <span class="logo-badge">📚 ESPM</span>
-            <span class="sep">|</span>
-            <span class="logo-badge">⚡ Accenture</span>
-        </div>
-    </div>
-    <h1>Stock <span>Policy</span> Dashboard</h1>
-    <span class="badge">Q4 2024 · Hackathon CDN</span>
+    <h1>Dashboard de Politica <span>(s,S)</span> &mdash; Q4/2024</h1>
+    <span class="badge">v2.0 &bull; ABC Ponderada</span>
 </div>
 
 <div class="nav">
-    <button class="active" onclick="switchPage('business')">📊 Visão de Negócios</button>
-    <button onclick="switchPage('technical')">⚙️ Visão Técnica</button>
-    <button onclick="switchPage('simulation')">🎬 Simulação Animada</button>
+    <button class="active" onclick="switchPage('overview')">Visao Geral</button>
+    <button onclick="switchPage('abc')">Curva ABC</button>
+    <button onclick="switchPage('lojas')">Por Loja</button>
+    <button onclick="switchPage('skus')">SKU Detalhado</button>
+    <button onclick="switchPage('sim')">Simulacao Diaria</button>
+    <button onclick="switchPage('config')">Configuracao</button>
 </div>
 
 <div class="content">
 
-<!-- ========================================================= -->
-<!-- PAGE 1: BUSINESS -->
-<!-- ========================================================= -->
-<div id="page-business" class="page active">
-
-    <div class="kpi-grid" id="kpi-container"></div>
-
-    <div class="insight">
-        <h3>💡 O Diagnóstico em Uma Frase</h3>
-        <p>
-            O modelo atinge <span class="highlight">99,94% de nível de serviço</span> — muito acima da meta de 92%.
-            Mas o <span class="highlight">forecast superestima a demanda em 51%</span>, gerando R$ 1.927/trim em
-            custo de excesso de estoque. A política conservadora <span class="highlight">esconde o problema</span>:
-            resolvendo o forecast, liberamos capital sem perder serviço.
-        </p>
-    </div>
-
-    <div class="section-title">📈 <span>Performance vs. Real</span></div>
-
-    <div class="two-col">
-        <div class="chart-container">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">Estoque: Simulado vs. Real (NEOSORO 1314)</h3>
-            <div id="chart-hero-comparison"></div>
-        </div>
-        <div class="chart-container">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">Distribuição da Demanda (ABC)</h3>
-            <div id="chart-abc"></div>
-        </div>
-    </div>
-
-    <div class="section-title">📊 <span>Top 10 SKUs por Receita em Risco</span></div>
-    <div class="chart-container">
-        <div style="overflow-x:auto;">
-            <table class="data-table" id="revenue-risk-table"></table>
-        </div>
-    </div>
-
-    <div class="section-title">🔄 <span>Comparativo entre Lojas</span></div>
-    <div class="two-col">
-        <div class="chart-container">
-            <div id="chart-loja-comparison"></div>
-        </div>
-        <div class="chart-container">
-            <div class="narrative">
-                <strong>⏱ Lead time define a política:</strong> Loja 1314 (LT=9d) precisa de <strong>s=180, S=339</strong>
-                para NEOSORO — 16x mais estoque que a Loja 841 (s=11). O lead time longo
-                <strong>amplifica o erro de forecast</strong> em 3x vs 1,7x.
-            </div>
-            <div class="narrative">
-                <strong>💰 Custo de pedido é dominado por poucos SKUs:</strong>
-                PERCOF 841 (R$ 260) + ABRILAR 200ml 1314 (R$ 391) + OSELTAMIVIR 841 (R$ 304)
-                = <strong>36% de todo o custo de reposição</strong>.
-            </div>
-        </div>
-    </div>
-
-    <div class="section-title">📉 <span>Custos Ocultos: Over-forecast vs. Under-forecast</span></div>
-    <div class="two-col">
-        <div class="chart-container">
-            <div id="chart-over-under"></div>
-        </div>
-        <div class="chart-container">
-            <div class="insight" style="height:100%;">
-                <h3>⚠️ Assimetria de Risco</h3>
-                <p>
-                    Custo de errar <span class="highlight">para mais</span> (R$ 1.927/trim):
-                    estoque que nunca girou, pagando holding o trimestre inteiro.<br><br>
-                    Custo de errar <span class="highlight">para menos</span> (R$ 234/trim):
-                    vendas perdidas reais — apenas 3 unidades.<br><br>
-                    <strong>Razão: 8,2x</strong> — o excesso é mais caro que a falta.
-                    Modelos conservadores <em>parecem</em> seguros,
-                    mas o custo do "colchão" é real.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="section-title">🎯 <span>Próximos Passos (Recomendados)</span></div>
-    <div class="chart-container">
-        <table class="data-table">
-            <tr><th>#</th><th>Ação</th><th>Impacto Estimado</th><th>Esforço</th><th>ROI</th></tr>
-            <tr>
-                <td class="num">1</td><td>review_days 5 → 7</td>
-                <td class="num" style="color:#00b894;">-R$ 770/trim</td><td>10 min</td><td class="num" style="font-weight:700;">∞</td>
-            </tr>
-            <tr>
-                <td class="num">2</td><td>z 0,84 → 1,28 (eliminar rupturas)</td>
-                <td class="num" style="color:#00b894;">+R$ 6,72/trim · 0 lost sales</td><td>10 min</td><td class="num" style="font-weight:700;">34,8x</td>
-            </tr>
-            <tr>
-                <td class="num">3</td><td>Customizar ABRILAR 1314 + NEOSORO 841</td>
-                <td class="num" style="color:#00b894;">Proteger R$ 2.091 receita</td><td>30 min</td><td class="num" style="font-weight:700;">311x</td>
-            </tr>
-            <tr>
-                <td class="num">4</td><td>Corrigir uplift promocional</td>
-                <td class="num" style="color:#00b894;">-R$ 432/trim</td><td>4-8h</td><td class="num" style="font-weight:700;">∞ (recorrente)</td>
-            </tr>
-            <tr>
-                <td class="num">5</td><td>SL diferenciado ABC (3 camadas)</td>
-                <td class="num" style="color:#00b894;">Liberar R$ 3.839 capital</td><td>4h</td><td class="num" style="font-weight:700;">23,5x</td>
-            </tr>
-        </table>
-    </div>
-
+<!-- ==================== OVERVIEW ==================== -->
+<div id="page-overview" class="page active">
+<div class="kpi-grid" id="kpi-overview"></div>
+<div class="two-col">
+    <div class="chart-container" id="chart-weekly" style="height:350px;"></div>
+    <div class="chart-container" id="chart-promo" style="height:350px;"></div>
+</div>
+<div class="insight" id="insight-overview"></div>
 </div>
 
-<!-- ========================================================= -->
-<!-- PAGE 2: TECHNICAL -->
-<!-- ========================================================= -->
-<div id="page-technical" class="page">
-
-    <div class="section-title">🧠 <span>Arquitetura do Modelo</span></div>
-
-    <div class="chart-container" style="text-align:center;">
-        <div style="display:flex;justify-content:space-around;align-items:center;flex-wrap:wrap;gap:12px;padding:20px 0;">
-            <div style="background:#302b63;color:#fff;padding:16px 24px;border-radius:10px;min-width:120px;">
-                <div style="font-size:12px;opacity:0.7;">ETAPA 1</div>
-                <div style="font-weight:700;margin-top:4px;">📦 Panel<br><span style="font-size:11px;opacity:0.7;">8 CSVs → diário por SKU</span></div>
-            </div>
-            <div style="font-size:28px;color:#00d4aa;">→</div>
-            <div style="background:#302b63;color:#fff;padding:16px 24px;border-radius:10px;min-width:120px;">
-                <div style="font-size:12px;opacity:0.7;">ETAPA 2</div>
-                <div style="font-weight:700;margin-top:4px;">🔮 Forecast<br><span style="font-size:11px;opacity:0.7;">3 fontes + uplift promo</span></div>
-            </div>
-            <div style="font-size:28px;color:#00d4aa;">→</div>
-            <div style="background:#302b63;color:#fff;padding:16px 24px;border-radius:10px;min-width:120px;">
-                <div style="font-size:12px;opacity:0.7;">ETAPA 3</div>
-                <div style="font-weight:700;margin-top:4px;">🎯 Política (s,S)<br><span style="font-size:11px;opacity:0.7;">z=0,84 · review=5d</span></div>
-            </div>
-            <div style="font-size:28px;color:#00d4aa;">→</div>
-            <div style="background:#302b63;color:#fff;padding:16px 24px;border-radius:10px;min-width:120px;">
-                <div style="font-size:12px;opacity:0.7;">ETAPA 4</div>
-                <div style="font-weight:700;margin-top:4px;">⚡ Simulação<br><span style="font-size:11px;opacity:0.7;">5.336 dias-SKU · 92 dias</span></div>
-            </div>
-        </div>
-    </div>
-
-    <div class="section-title">📐 <span>Fórmula da Política (s, S)</span></div>
-    <div class="two-col">
-        <div class="chart-container" style="font-family:'JetBrains Mono',monospace;font-size:15px;line-height:2;">
-            <code><strong>s</strong> = ceil( μ × L + z × σ × √L )</code><br>
-            <code><strong>S</strong> = ceil( s + μ × review_days )</code><br><br>
-            <div style="font-family:'Inter',sans-serif;font-size:13px;color:#555;">
-                Onde:<br>
-                μ = demanda média diária (forecast)<br>
-                σ = desvio padrão da demanda<br>
-                L = lead time (3 ou 9 dias)<br>
-                z = fator de segurança (0,84 = 80º percentil)<br>
-                review_days = intervalo entre revisões (5 dias)
-            </div>
-        </div>
-        <div class="chart-container">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">Exemplo: NEOSORO Loja 1314</h3>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;line-height:1.8;">
-                μ = 9,3 un/dia<br>
-                σ = 4,7 un<br>
-                L = 9 dias<br>
-                z = 0,84<br><br>
-                <strong>s</strong> = ceil(9,3×9 + 0,84×4,7×3)<br>
-                = ceil(83,7 + 11,8)<br>
-                = <strong style="color:#00b894;">96</strong> (estatístico)<br><br>
-                + piso empírico (75% histórico)<br>
-                = <strong style="color:#e17055;">180</strong> (final, com empirical floor)
-            </div>
-        </div>
-    </div>
-
-    <div class="section-title">🔬 <span>Validação do Simulador</span></div>
-    <div class="kpi-grid">
-        <div class="kpi-card green">
-            <div class="label">Lead Time</div>
-            <div class="value">100%</div>
-            <div class="sub">113 ordens chegam no dia certo</div>
-        </div>
-        <div class="kpi-card teal">
-            <div class="label">Estoque Negativo</div>
-            <div class="value">0</div>
-            <div class="sub">Zero dias com saldo negativo</div>
-        </div>
-        <div class="kpi-card green">
-            <div class="label">Lost Sales</div>
-            <div class="value">3 un</div>
-            <div class="sub">Validadas individualmente ✅</div>
-        </div>
-        <div class="kpi-card teal">
-            <div class="label">Ordens Múltiplas</div>
-            <div class="value">0</div>
-            <div class="sub">Zero ordens duplicadas no mesmo dia</div>
-        </div>
-    </div>
-
-    <div class="section-title">📊 <span>Grid Search: z × review_days</span></div>
-    <div class="chart-container">
-        <div id="chart-grid"></div>
-    </div>
-
-    <div class="section-title">📈 <span>Previsão vs. Realizado (semanal)</span></div>
-    <div class="chart-container">
-        <div id="chart-weekly"></div>
-    </div>
-
-    <div class="section-title">📋 <span>Tabela de Política (Top 15 por Demanda)</span></div>
-    <div class="chart-container">
-        <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
-            <table class="data-table" id="policy-table"></table>
-        </div>
-    </div>
-
+<!-- ==================== ABC ==================== -->
+<div id="page-abc" class="page">
+<div class="two-col">
+    <div class="chart-container" id="chart-abc-pareto" style="height:400px;"></div>
+    <div class="chart-container" id="chart-abc-bubble" style="height:400px;"></div>
+</div>
+<div class="kpi-grid" id="kpi-abc"></div>
 </div>
 
-<!-- ========================================================= -->
-<!-- PAGE 3: SIMULATION ANIMATION -->
-<!-- ========================================================= -->
-<div id="page-simulation" class="page">
-
-    <div class="insight">
-        <h3>🎬 O Simulador em Ação</h3>
-        <p>
-            Arraste o slider ou clique em <strong>Play</strong> para ver o estoque evoluir dia a dia no Q4/2024.
-            As <span style="color:#00b894;font-weight:600;">barras verdes</span> são entregas chegando.
-            Os <span style="color:#e17055;font-weight:600;">marcadores vermelhos</span> são dias com ruptura.
-            A linha azul mostra o estoque <strong>simulado</strong>; a laranja tracejada, o <strong>real</strong> histórico.
-        </p>
-    </div>
-
-    <div class="chart-container">
-        <div class="timeline-controls">
-            <button class="btn-play" id="btn-play" onclick="togglePlay()">▶ Play</button>
-            <button class="btn-reset" onclick="resetAnimation()">⟲ Reset</button>
-            <select id="sku-select" onchange="changeSKU()">
-                <option value="18064_1314">NEOSORO · Loja 1314 (LT=9d)</option>
-                <option value="18064_841">NEOSORO · Loja 841 (LT=3d)</option>
-            </select>
-            <select id="chart-type" onchange="updateChartType()">
-                <option value="inventory">Estoque (unidades)</option>
-                <option value="value">Valor (R$)</option>
-            </select>
-            <span class="speed-label">Velocidade:</span>
-            <select id="speed-select">
-                <option value="100">1x</option>
-                <option value="300">3x</option>
-                <option value="700" selected>7x</option>
-                <option value="1500">15x</option>
-            </select>
-        </div>
-        <div id="chart-animation" style="height:500px;"></div>
-        <div style="display:flex;align-items:center;gap:16px;margin-top:12px;flex-wrap:wrap;">
-            <div style="font-size:13px;color:#555;">
-                <strong>Dia:</strong> <span id="day-counter">1</span> / <span id="day-total">92</span>
-                &nbsp;|&nbsp; <strong>Data:</strong> <span id="date-display">2024-10-01</span>
-            </div>
-            <div style="font-size:13px;color:#555;">
-                <strong>Estoque:</strong> <span id="inv-display">0</span> un
-                &nbsp;|&nbsp; <strong>Valor:</strong> R$ <span id="value-display">0,00</span>
-            </div>
-            <div id="stockout-badge" style="display:none;background:#e17055;color:#fff;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;">
-                ⚠️ RUPTURA
-            </div>
-        </div>
-    </div>
-
-    <div class="two-col">
-        <div class="chart-container">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">Fluxo de Pedidos e Entregas</h3>
-            <div id="chart-flow"></div>
-        </div>
-        <div class="chart-container">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">Demanda Diária vs. Forecast</h3>
-            <div id="chart-demand"></div>
-        </div>
-    </div>
-
+<!-- ==================== LOJAS ==================== -->
+<div id="page-lojas" class="page">
+<div class="two-col">
+    <div class="chart-container" id="chart-lojas-radar" style="height:380px;"></div>
+    <div class="chart-container" id="chart-lojas-bar" style="height:380px;"></div>
+</div>
+<div class="chart-container" id="chart-lojas-hero" style="height:400px;"></div>
 </div>
 
-</div><!-- content -->
+<!-- ==================== SKU DETALHADO ==================== -->
+<div id="page-skus" class="page">
+<div class="chart-container" id="chart-rev-risk" style="height:420px;"></div>
+<div style="overflow-x:auto;">
+    <div class="chart-container">
+        <table class="data-table" id="table-skus"></table>
+    </div>
+</div>
+</div>
+
+<!-- ==================== SIMULACAO DIARIA ==================== -->
+<div id="page-sim" class="page">
+<div class="two-col">
+    <div class="chart-container" id="chart-hero1" style="height:380px;"></div>
+    <div class="chart-container" id="chart-hero2" style="height:380px;"></div>
+</div>
+<div class="chart-container" id="chart-daily-agg" style="height:380px;"></div>
+</div>
+
+<!-- ==================== CONFIG ==================== -->
+<div id="page-config" class="page">
+<div class="param-grid" id="param-grid"></div>
+<div class="insight" id="insight-config"></div>
+<div class="chart-container" id="chart-tune" style="height:400px;"></div>
+</div>
+
+</div>
 
 <div class="footer">
-    Hackathon CDN · ESPM · Accenture · Q4/2024 · Stock Policy Dashboard v1.0
+    Hackathon CDN &middot; ESPM &middot; Q4/2024 &middot; ABC Ponderada 70/88 &middot; z=(A:{z_by_class.get('A',1.28)}, B:{z_by_class.get('B',0.84)}, C:{z_by_class.get('C',0.0)}) &middot; Pisos {floors}
 </div>
 
 <script>
-// =========================================================
-// DATA
-// =========================================================
-const HERO_DATA = {json.dumps(hero_json)};
-const HERO2_DATA = {json.dumps(hero2_json)};
-const SKU_DATA = {json.dumps(sku_json)};
-const WEEKLY_DATA = {json.dumps(weekly_json)};
-const ABC_DATA = {json.dumps(abc_json)};
-const TUNE_DATA = {json.dumps(tune_json)};
-const LOJA_DATA = {json.dumps(loja_json)};
-const PROMO_DATA = {json.dumps(promo_json)};
-const OVER_UNDER_DATA = {json.dumps(over_under_json)};
-const REV_RISK_DATA = {json.dumps(rev_risk_json)};
-const KPI = {json.dumps(kpi)};
+// ============ EMBEDDED DATA ============
+const SIM_DATA = {timeline_json};
+const SKU_DATA = {sku_json};
+const METRICS = {{
+    service_level: {sl},
+    actual_service_level: {sl_act},
+    avg_inventory_value: {avg_inv},
+    actual_avg_inventory_value: {avg_inv_act},
+    inventory_value_delta_vs_actual: {inv_delta},
+    total_ordering_cost: {cost},
+    total_lost_sales_units: {lost_u},
+    total_lost_sales_value: {lost_value},
+    total_orders: {orders},
+    total_demand: {act_units},
+    total_forecast: {fc_units},
+}};
+const ABC_DATA = {abc_json};
+const LOJA_DATA = {loja_json};
+const WEEKLY_DATA = {weekly_json};
+const PROMO_DATA = {promo_json};
+const TUNE_DATA = {tune_json};
+const REV_RISK_DATA = {rev_json};
+const CONFIG = {{
+    abc_classification: "{abc_mode}",
+    z_by_class: {json.dumps(z_by_class)},
+    z_uniform: {z_uniform},
+    review_days: {review},
+    reorder_quantile: {meta.get('empirical_floor_reorder_quantile',0.75)},
+    order_up_to_quantile: {meta.get('empirical_floor_order_up_to_quantile',0.90)},
+    forecast_mode: "static + promo median/sqrt + zero-forecast <=3un",
+    promo_cap: 2.0,
+}};
 
-// =========================================================
-// PAGE SWITCHING
-// =========================================================
+// ============ PAGE SWITCHING ============
 function switchPage(page) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
-    document.getElementById('page-' + page).classList.add('active');
-    document.querySelector(`.nav button[onclick*="${{page}}"]`).classList.add('active');
-
-    if (page === 'simulation') {{
-        setTimeout(initAnimation, 100);
+    document.getElementById('page-'+page).classList.add('active');
+    var btns = document.querySelectorAll('.nav button');
+    for (var i=0; i<btns.length; i++) {{
+        if (btns[i].getAttribute('onclick') && btns[i].getAttribute('onclick').indexOf(page)>=0) {{
+            btns[i].classList.add('active');
+        }}
     }}
-    if (page === 'business') {{
-        setTimeout(drawBusinessCharts, 100);
-    }}
-    if (page === 'technical') {{
-        setTimeout(drawTechnicalCharts, 100);
-    }}
+    setTimeout(function() {{
+        if (page === 'overview') drawOverview();
+        if (page === 'abc') drawABC();
+        if (page === 'lojas') drawLojas();
+        if (page === 'skus') drawSKUs();
+        if (page === 'sim') drawSimulation();
+        if (page === 'config') drawConfig();
+    }}, 100);
 }}
 
-// =========================================================
-// BUSINESS CHARTS
-// =========================================================
-function drawBusinessCharts() {{
-    // KPI Cards
-    const container = document.getElementById('kpi-container');
-    container.innerHTML = `
-        <div class="kpi-card green">
-            <div class="label">Nível de Serviço</div>
-            <div class="value">${{(KPI.service_level*100).toFixed(2)}}%</div>
-            <div class="sub">Meta: ≥ 92% <span style="color:#00b894;">✅</span></div>
-            <div class="delta pos">+${{((KPI.service_level - KPI.actual_service_level)*100).toFixed(2)}}pp vs. real</div>
+// ============ OVERVIEW ============
+function drawOverview() {{
+    var m = METRICS;
+    var slPct = (m.service_level*100).toFixed(2);
+    var delta = m.avg_inventory_value - m.actual_avg_inventory_value;
+    var overForecast = ((m.total_forecast/m.total_demand - 1)*100).toFixed(0);
+
+    var kpi = document.getElementById('kpi-overview');
+    kpi.innerHTML = `
+        <div class="kpi-card green" style="grid-column:span 1;">
+            <div class="label">Nivel de Servico</div>
+            <div class="value">${{slPct}}%</div>
+            <div class="sub">Meta: >= 92% <span style="color:#00b894;">&#10004;</span></div>
+            <div class="delta pos">+${{((m.service_level-m.actual_service_level)*100).toFixed(2)}}pp vs real</div>
         </div>
         <div class="kpi-card purple">
-            <div class="label">Capital Médio em Estoque</div>
-            <div class="val-comp">
-                <span class="sim">R$ ${{KPI.avg_inventory_value.toFixed(2)}}</span>
-                <span class="arrow">←</span>
-                <span class="actual">R$ ${{KPI.actual_avg_inventory_value.toFixed(2)}}</span>
-            </div>
-            <div class="sub">Simulado vs. Real histórico</div>
-            <div class="delta ${{KPI.avg_inventory_value > KPI.actual_avg_inventory_value ? 'neg' : 'pos'}}">
-                ${{KPI.avg_inventory_value > KPI.actual_avg_inventory_value ? '+' : '-'}}R$ ${{Math.abs(KPI.avg_inventory_value - KPI.actual_avg_inventory_value).toFixed(2)}}
-            </div>
+            <div class="label">Estoque Medio</div>
+            <div class="value">R$ ${{m.avg_inventory_value.toFixed(2)}}</div>
+            <div class="sub">Real: R$ ${{m.actual_avg_inventory_value.toFixed(2)}}</div>
+            <div class="delta ${{delta > 0.01 ? 'neg' : 'pos'}}">${{delta > 0.01 ? '+' : ''}}R$ ${{Math.abs(delta).toFixed(2)}} vs real</div>
         </div>
         <div class="kpi-card orange">
-            <div class="label">Custo Total de Reposição</div>
-            <div class="value">R$ ${{KPI.total_ordering_cost.toFixed(2)}}</div>
-            <div class="sub">${{KPI.total_orders}} pedidos emitidos</div>
+            <div class="label">Custo de Reposicao</div>
+            <div class="value">R$ ${{m.total_ordering_cost.toFixed(2)}}</div>
+            <div class="sub">${{m.total_orders}} pedidos</div>
         </div>
         <div class="kpi-card teal">
             <div class="label">Vendas Perdidas</div>
-            <div class="value">${{KPI.total_lost_sales_units}} un</div>
-            <div class="sub">R$ ${{KPI.total_lost_sales_value.toFixed(2)}} em receita</div>
+            <div class="value">${{m.total_lost_sales_units}} un</div>
+            <div class="sub">R$ ${{m.total_lost_sales_value.toFixed(2)}}</div>
         </div>
-        <div class="kpi-card blue" style="grid-column:span 2;">
-            <div class="label">Demanda Total Q4/2024</div>
-            <div class="val-comp">
-                <span class="sim">${{KPI.total_actual}} un</span>
-                <span class="arrow">←</span>
-                <span class="actual">${{KPI.total_forecast}} un (forecast)</span>
-            </div>
-            <div class="sub">Forecast superestima em ${{((KPI.total_forecast/KPI.total_actual - 1)*100).toFixed(0)}}%</div>
-            <div class="meter"><div class="meter-fill" style="width:${{(KPI.total_actual/KPI.total_forecast*100).toFixed(0)}}%;background:#e17055;"></div></div>
+        <div class="kpi-card blue">
+            <div class="label">Demanda vs Forecast</div>
+            <div class="value">${{m.total_demand}} / ${{m.total_forecast.toFixed(0)}} un</div>
+            <div class="sub">Forecast ${{overForecast}}% acima</div>
         </div>
     `;
 
-    // Hero comparison chart
-    const hero = HERO_DATA;
-    const dates = hero.map(d => d.date_str);
-    const simInv = hero.map(d => d.ending_inventory);
-    const actInv = hero.map(d => d.actual_balance || 0);
-    const received = hero.map(d => d.received_qty || 0);
-    const lost = hero.map(d => d.lost_sales_units > 0 ? d.lost_sales_units : null);
+    // Weekly demand vs forecast
+    var wDemand = WEEKLY_DATA.map(d => d.demand);
+    var wForecast = WEEKLY_DATA.map(d => d.forecast);
+    var wWeeks = WEEKLY_DATA.map(d => 'W' + d.week);
+    var wLost = WEEKLY_DATA.map(d => d.lost);
 
-    const trace1 = {{ type: 'scatter', mode: 'lines', name: 'Simulado', x: dates, y: simInv, line: {{color: '#302b63', width: 2}} }};
-    const trace2 = {{ type: 'scatter', mode: 'lines', name: 'Real (histórico)', x: dates, y: actInv, line: {{color: '#e17055', width: 2, dash: 'dot'}} }};
-    const trace3 = {{ type: 'bar', name: 'Entregas', x: dates, y: received, marker: {{color: 'rgba(0,212,170,0.4)'}}, yaxis: 'y2' }};
-    const layout = {{
-        margin: {{l: 50, r: 30, t: 10, b: 40}},
-        height: 280,
-        legend: {{orientation: 'h', y: -0.2}},
-        yaxis: {{title: 'Unidades'}},
-        yaxis2: {{title: 'Entregas', overlaying: 'y', side: 'right', showgrid: false}},
-        hovermode: 'x unified',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
-    }};
-    Plotly.newPlot('chart-hero-comparison', [trace1, trace2, trace3], layout, {{responsive: true, displayModeBar: false}});
+    var wTrace1 = {{ x: wWeeks, y: wDemand, type: 'bar', name: 'Demanda Real', marker: {{ color: '#302b63' }} }};
+    var wTrace2 = {{ x: wWeeks, y: wForecast, type: 'scatter', name: 'Forecast', mode: 'lines+markers', line: {{ color: '#e17055', width: 2 }}, marker: {{ size: 6 }} }};
+    Plotly.newPlot('chart-weekly', [wTrace1, wTrace2], {{
+        title: 'Demanda vs Forecast Semanal', margin: {{ t:40, r:20, b:40, l:40 }},
+        barmode: 'group', legend: {{ orientation:'h', y:1.1 }},
+    }}, {{ responsive: true }});
 
-    // ABC chart
-    const abc = ABC_DATA;
-    const abcLabels = abc.map(d => d.label ? d.label.substring(0, 20) : 'SKU ' + d.product);
-    const abcDemand = abc.map(d => d.demand);
-    const abcCum = abc.map(d => (d.cum_demand * 100).toFixed(1));
+    // Promo comparison
+    var pLabels = PROMO_DATA.map(d => d.is_promo ? 'Com Promocao' : 'Sem Promocao');
+    var pDemand = PROMO_DATA.map(d => d.demand);
+    var pForecast = PROMO_DATA.map(d => d.forecast);
+    var pDays = PROMO_DATA.map(d => d.days + ' dias');
+    Plotly.newPlot('chart-promo', [
+        {{ x: pLabels, y: pDemand, type: 'bar', name: 'Demanda', marker: {{ color: '#00b894' }}, text: pDays, textposition:'auto' }},
+        {{ x: pLabels, y: pForecast, type: 'bar', name: 'Forecast', marker: {{ color: '#e17055', opacity:0.6 }} }}
+    ], {{
+        title: 'Impacto Promocional', barmode:'group', margin: {{ t:40, r:20, b:40, l:40 }},
+        legend: {{ orientation:'h', y:1.1 }},
+    }}, {{ responsive: true }});
 
-    const abcColors = abc.map(d => d.cum_demand <= 0.80 ? '#302b63' : d.cum_demand <= 0.95 ? '#00d4aa' : '#dfe6e9');
-    const abcTrace = {{
-        type: 'bar', x: abcLabels, y: abcDemand,
-        marker: {{color: abcColors}},
-        text: abcCum.map(v => v + '%'),
-        textposition: 'outside',
-    }};
-    const abcLayout = {{
-        margin: {{l: 50, r: 30, t: 10, b: 80}},
-        height: 280,
-        yaxis: {{title: 'Unidades'}},
-        xaxis: {{tickangle: -45, tickfont: {{size: 9}}}},
-        hovermode: 'x',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
+    // Insight
+    document.getElementById('insight-overview').innerHTML = `
+        <h3>Resumo Executivo</h3>
+        <p>Politica <b>(s,S)</b> com segmentacao ABC ponderada por demanda (thresholds 70/88).<br>
+        <b>NEOSORO</b> (70% da demanda) protegido com z=1,28 — zero ruptura.<br>
+        <b>Estoque R$${{m.avg_inventory_value.toFixed(0)}}/dia</b> — ${{Math.abs(delta).toFixed(0) > 0 && delta < 0 ? Math.abs(delta).toFixed(0)+' abaixo' : Math.abs(delta).toFixed(0)+' acima'}} da operacao real.<br>
+        <b>Forecast</b> ${{m.total_forecast.toFixed(0)}} vs ${{m.total_demand}} un reais — superestimacao de ${{overForecast}}% (antes era 51%).<br>
+        <b>SL ${{slPct}}%</b> — acima da meta de 99,5% e do target oficial de 92%.</p>
+    `;
+}}
+
+// ============ ABC ============
+function drawABC() {{
+    var abc = ABC_DATA;
+    var labels = abc.map(d => d.label);
+    var demand = abc.map(d => d.demand);
+    var cum = abc.map(d => d.cum_demand * 100);
+    var colors = cum.map(c => c <= 70 ? '#00b894' : (c <= 88 ? '#fdcb6e' : '#e17055'));
+    var invVals = abc.map(d => d.inv_value);
+
+    Plotly.newPlot('chart-abc-pareto', [
+        {{ x: labels, y: demand, type: 'bar', name: 'Demanda (un)', marker: {{ color: colors }}, yaxis:'y' }},
+        {{ x: labels, y: cum, type: 'scatter', name: '% Acumulada', mode:'lines+markers', yaxis:'y2', line: {{ color:'#0984e3', width:2 }} }}
+    ], {{
+        title: 'Curva ABC (Demanda Volume)', margin: {{ t:40, r:50, b:80, l:40 }},
+        xaxis: {{ tickangle:-45, automargin:true }},
+        yaxis: {{ title:'Demanda (un)' }},
+        yaxis2: {{ title:'% Acum.', overlaying:'y', side:'right', range:[0,105] }},
+        legend: {{ orientation:'h', y:1.15 }},
         shapes: [
-            {{type: 'line', x0: -0.5, x1: abcLabels.length - 0.5, y0: abcDemand[0]*0.8, y1: abcDemand[0]*0.8,
-              line: {{color: '#e17055', width: 1, dash: 'dash'}} }}
+            {{ type:'line', x0:-0.5, x1:labels.length, y0:70, y1:70, yref:'y2', line:{{ dash:'dash', color:'#00b894' }} }},
+            {{ type:'line', x0:-0.5, x1:labels.length, y0:88, y1:88, yref:'y2', line:{{ dash:'dash', color:'#fdcb6e' }} }},
         ]
-    }};
-    Plotly.newPlot('chart-abc', [abcTrace], abcLayout, {{responsive: true, displayModeBar: false}});
+    }}, {{ responsive: true }});
 
-    // Revenue risk table
-    const revTable = document.getElementById('revenue-risk-table');
-    revTable.innerHTML = `
-        <tr><th>SKU</th><th>Produto</th><th>Loja</th><th>Receita Q4</th><th>Dias Ruptura</th><th>Status</th></tr>
-        ${{REV_RISK_DATA.map(r => `
-            <tr>
-                <td class="num">${{r.product}}</td>
-                <td>${{r.product_name ? r.product_name.substring(0, 30) : ''}}</td>
-                <td class="num">${{r.location}}</td>
-                <td class="num">R$ ${{r.revenue.toFixed(2)}}</td>
-                <td class="num">${{r.stockout}}</td>
-                <td>${{r.stockout > 0 ? '<span class="badge-sl low">⚠️ RUPTURA</span>' : '<span class="badge-sl high">✅ OK</span>'}}</td>
-            </tr>
-        `).join('')}}
+    Plotly.newPlot('chart-abc-bubble', [{{
+        x: demand, y: invVals,
+        mode: 'markers+text',
+        type: 'scatter',
+        text: labels,
+        textposition: 'top center',
+        textfont: {{ size:9 }},
+        marker: {{
+            size: demand.map(d => Math.max(Math.sqrt(d)*6, 8)),
+            color: colors,
+            opacity:0.7,
+        }},
+    }}], {{
+        title: 'Demanda vs Estoque por SKU', margin: {{ t:40, r:20, b:40, l:50 }},
+        xaxis: {{ title:'Demanda (un)' }},
+        yaxis: {{ title:'Estoque Medio (R$)' }},
+        showlegend: false,
+    }}, {{ responsive: true }});
+
+    var aCount = SKU_DATA.filter(d => d.abc_class === 'A').length;
+    var bCount = SKU_DATA.filter(d => d.abc_class === 'B').length;
+    var cCount = SKU_DATA.filter(d => d.abc_class === 'C').length;
+    var aDem = abc.filter(d => d.cum_demand <= 0.70).reduce((s,d) => s+d.demand, 0);
+    var bDem = abc.filter(d => d.cum_demand > 0.70 && d.cum_demand <= 0.88).reduce((s,d) => s+d.demand, 0);
+    var cDem = abc.filter(d => d.cum_demand > 0.88).reduce((s,d) => s+d.demand, 0);
+
+    document.getElementById('kpi-abc').innerHTML = `
+        <div class="kpi-card green">
+            <div class="label">Classe A (z=1,28)</div>
+            <div class="value">${{aCount}} pares</div>
+            <div class="sub">${{aDem}} un (${{(aDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#fdcb6e">
+            <div class="label">Classe B (z=0,84)</div>
+            <div class="value">${{bCount}} pares</div>
+            <div class="sub">${{bDem}} un (${{(bDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+        </div>
+        <div class="kpi-card orange">
+            <div class="label">Classe C (z=0,00)</div>
+            <div class="value">${{cCount}} pares</div>
+            <div class="sub">${{cDem}} un (${{(cDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+        </div>
     `;
-
-    // Loja comparison chart
-    const lojaLabels = LOJA_DATA.map(d => 'Loja ' + d.location);
-    const lojaInv = LOJA_DATA.map(d => d.avg_inv);
-    const lojaActInv = LOJA_DATA.map(d => d.avg_actual_inv);
-    const lojaOrd = LOJA_DATA.map(d => d.orders);
-
-    Plotly.newPlot('chart-loja-comparison', [
-        {{type: 'bar', name: 'Estoque Simulado', x: lojaLabels, y: lojaInv, marker: {{color: '#302b63'}}}},
-        {{type: 'bar', name: 'Estoque Real', x: lojaLabels, y: lojaActInv, marker: {{color: '#e17055'}}}},
-    ], {{
-        barmode: 'group', margin: {{l: 50, r: 30, t: 10, b: 40}}, height: 280,
-        yaxis: {{title: 'R$'}},
-        legend: {{orientation: 'h', y: -0.2}},
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    }}, {{responsive: true, displayModeBar: false}});
-
-    // Over/under chart
-    const ou = OVER_UNDER_DATA.filter(d => d.over + d.under > 0).sort((a,b) => (b.over+b.under) - (a.over+a.under)).slice(0, 10);
-    const ouLabels = ou.map(d => d.label ? d.label.substring(0, 18) : 'SKU ' + d.product);
-    Plotly.newPlot('chart-over-under', [
-        {{type: 'bar', name: 'Over (superestimou)', x: ouLabels, y: ou.map(d => d.over), marker: {{color: '#e17055'}}}},
-        {{type: 'bar', name: 'Under (subestimou)', x: ouLabels, y: ou.map(d => d.under), marker: {{color: '#00b894'}}}},
-    ], {{
-        barmode: 'relative', margin: {{l: 50, r: 30, t: 10, b: 80}}, height: 280,
-        xaxis: {{tickangle: -45, tickfont: {{size: 9}}}},
-        yaxis: {{title: 'Unidades'}},
-        legend: {{orientation: 'h', y: -0.3}},
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    }}, {{responsive: true, displayModeBar: false}});
 }}
 
-// =========================================================
-// TECHNICAL CHARTS
-// =========================================================
-function drawTechnicalCharts() {{
-    // Grid search chart
+// ============ LOJAS ============
+function drawLojas() {{
+    var l841 = LOJA_DATA.find(d => d.location === 841);
+    var l1314 = LOJA_DATA.find(d => d.location === 1314);
+
+    Plotly.newPlot('chart-lojas-radar', [{{
+        type: 'scatterpolar',
+        r: [l841.demand/METRICS.total_demand*100, l841.orders, l841.lost_units, (l841.avg_inv/l841.avg_actual_inv-1)*100, l1314.demand/METRICS.total_demand*100, l1314.orders, l1314.lost_units, (l1314.avg_inv/l1314.avg_actual_inv-1)*100],
+        theta: ['% Demanda','Pedidos','Lost Sales','Var Estoque','% Demanda','Pedidos','Lost Sales','Var Estoque'],
+        fill: 'toself',
+        name: 'Metricas',
+    }}], {{
+        title: 'Comparativo por Loja', polar: {{ radialaxis: {{ visible:true }} }}, margin: {{ t:40, r:20, b:40, l:20 }},
+    }}, {{ responsive: true }});
+
+    Plotly.newPlot('chart-lojas-bar', [
+        {{ x: ['Loja 841','Loja 1314'], y: [l841.demand, l1314.demand], type:'bar', name:'Demanda', marker:{{ color:'#302b63' }} }},
+        {{ x: ['Loja 841','Loja 1314'], y: [l841.avg_inv, l1314.avg_inv], type:'bar', name:'Estoque (R$)', marker:{{ color:'#00b894', opacity:0.6 }} }},
+    ], {{
+        title: 'Demanda vs Estoque', margin: {{ t:40, r:20, b:40, l:50 }},
+        barmode: 'group', legend: {{ orientation:'h', y:1.1 }},
+    }}, {{ responsive: true }});
+
+    var hero1 = SIM_DATA.filter(d => d.product === 18064 && d.location === 1314);
+    Plotly.newPlot('chart-lojas-hero', [
+        {{ x: hero1.map(d => d.date), y: hero1.map(d => d.ending_inventory), type:'scatter', name:'Estoque Simulado', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' }},
+        {{ x: hero1.map(d => d.date), y: hero1.map(d => d.actual_balance||0), type:'scatter', name:'Estoque Real', mode:'lines', line:{{ color:'#0984e3', width:2, dash:'dash' }} }},
+    ], {{
+        title: 'NEOSORO 1314 — Estoque Dia a Dia', margin: {{ t:40, r:20, b:40, l:50 }},
+        legend: {{ orientation:'h', y:1.1 }},
+        xaxis: {{ title:'Data' }}, yaxis: {{ title:'Unidades' }},
+    }}, {{ responsive: true }});
+}}
+
+// ============ SKU DETAIL ============
+function drawSKUs() {{
+    var risk = REV_RISK_DATA;
+    Plotly.newPlot('chart-rev-risk', [
+        {{ x: risk.map(d => d.product_name), y: risk.map(d => d.revenue), type:'bar',
+           marker: {{ color: risk.map(d => d.stockout > 0 ? '#e17055' : '#00b894') }},
+           text: risk.map(d => 'Loja '+d.location + (d.stockout>0 ? ' (ruptura)' : '')),
+        }}
+    ], {{
+        title: 'Top 10 SKU-Loja por Receita', margin: {{ t:40, r:20, b:80, l:50 }},
+        xaxis: {{ tickangle:-45, automargin:true }},
+        yaxis: {{ title:'Receita (R$)' }},
+    }}, {{ responsive: true }});
+
+    var table = document.getElementById('table-skus');
+    var skus = SKU_DATA.sort((a,b) => b.total_actual_demand - a.total_actual_demand);
+    var rows = skus.map(d => `
+        <tr>
+            <td>${{d.product}}</td><td>${{d.product_name}}</td><td>Loja ${{d.location}}</td>
+            <td><span class="badge-sl ${{d.abc_class}}">${{d.abc_class}}</span></td>
+            <td class="num">${{d.reorder_point_s}}</td><td class="num">${{d.order_up_to_S}}</td>
+            <td class="num">${{d.total_actual_demand}}</td>
+            <td class="num">${{d.service_level ? (d.service_level*100).toFixed(1)+'%' : '-'}}</td>
+            <td class="num">R$${{d.avg_inventory_value.toFixed(0)}}</td>
+            <td class="num">${{d.total_lost_sales_units}}</td>
+        </tr>
+    `).join('');
+    table.innerHTML = `<thead><tr>
+        <th>SKU</th><th>Produto</th><th>Loja</th><th>ABC</th>
+        <th class="num">s</th><th class="num">S</th>
+        <th class="num">Demanda</th><th class="num">SL</th>
+        <th class="num">Estoque</th><th class="num">Perdido</th>
+    </tr></thead><tbody>${{rows}}</tbody>`;
+}}
+
+// ============ SIMULATION ============
+function drawSimulation() {{
+    var hero1 = SIM_DATA.filter(d => d.product === 18064 && d.location === 1314);
+    var hero2 = SIM_DATA.filter(d => d.product === 18064 && d.location === 841);
+
+    function simChart(id, data, title) {{
+        Plotly.newPlot(id, [
+            {{ x: data.map(d => d.date), y: data.map(d => d.ending_inventory), type:'scatter', name:'Estoque', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.08)' }},
+            {{ x: data.map(d => d.date), y: data.map(d => d.actual_demand), type:'bar', name:'Demanda', marker:{{ color:'#302b63', opacity:0.3 }}, yaxis:'y2' }},
+            {{ x: data.map(d => d.date), y: data.map(d => d.reorder_point_s || d.reorder_point), type:'scatter', name:'s (ponto de pedido)', mode:'lines', line:{{ color:'#fdcb6e', width:1, dash:'dash' }} }},
+        ], {{
+            title: title, margin: {{ t:40, r:50, b:40, l:50 }},
+            xaxis: {{ title:'Data' }}, yaxis: {{ title:'Unidades' }},
+            yaxis2: {{ title:'Demanda', overlaying:'y', side:'right', showgrid:false }},
+            legend: {{ orientation:'h', y:1.15 }},
+        }}, {{ responsive: true }});
+    }}
+
+    simChart('chart-hero1', hero1, 'NEOSORO 1314 (Classe A, z=1.28)');
+    simChart('chart-hero2', hero2, 'NEOSORO 841 (Classe B, z=0.84)');
+
+    var daily = {{}};
+    SIM_DATA.forEach(d => {{
+        var day = d.date.toString().slice(0,10);
+        if (!daily[day]) daily[day] = {{ inv:0, dem:0, lost:0 }};
+        daily[day].inv += d.simulated_inventory_value || 0;
+        daily[day].dem += d.actual_demand || 0;
+        daily[day].lost += d.lost_sales_units || 0;
+    }});
+    var keys = Object.keys(daily).sort();
+    Plotly.newPlot('chart-daily-agg', [
+        {{ x: keys, y: keys.map(k => daily[k].inv), type:'scatter', name:'Estoque (R$)', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' }},
+        {{ x: keys, y: keys.map(k => daily[k].dem), type:'scatter', name:'Demanda', mode:'lines', line:{{ color:'#e17055', width:1 }}, yaxis:'y2' }},
+    ], {{
+        title: 'Estoque Total Agregado Diario', margin: {{ t:40, r:50, b:40, l:50 }},
+        xaxis: {{ title:'Data' }}, yaxis: {{ title:'R$' }},
+        yaxis2: {{ title:'Unidades', overlaying:'y', side:'right', showgrid:false }},
+        legend: {{ orientation:'h', y:1.15 }},
+    }}, {{ responsive: true }});
+}}
+
+// ============ CONFIG ============
+function drawConfig() {{
+    var c = CONFIG;
+    document.getElementById('param-grid').innerHTML = `
+        <div class="param-card"><div class="param-label">Classificacao ABC</div><div class="param-value" style="font-size:14px;">${{c.abc_classification}}</div></div>
+        <div class="param-card"><div class="param-label">z Classe A</div><div class="param-value">${{c.z_by_class.A}}</div></div>
+        <div class="param-card"><div class="param-label">z Classe B</div><div class="param-value">${{c.z_by_class.B}}</div></div>
+        <div class="param-card"><div class="param-label">z Classe C</div><div class="param-value">${{c.z_by_class.C}}</div></div>
+        <div class="param-card"><div class="param-label">z Uniforme (base)</div><div class="param-value">${{c.z_uniform}}</div></div>
+        <div class="param-card"><div class="param-label">Review Days</div><div class="param-value">${{c.review_days}}d</div></div>
+        <div class="param-card"><div class="param-label">Piso Reorder</div><div class="param-value">${{c.reorder_quantile}}</div></div>
+        <div class="param-card"><div class="param-label">Piso Order-Up-To</div><div class="param-value">${{c.order_up_to_quantile}}</div></div>
+    `;
+
+    document.getElementById('insight-config').innerHTML = `
+        <h3>Metodo</h3>
+        <p><b>Forecast:</b> Media movel ponderada (45% recente-28d, 35% mesmo-weekday, 20% LY) com uplift promocional corrigido (mediana + dampening sqrt, cap 2.0).<br>
+        <b>Zero-Forecast:</b> SKUs com demanda <= 3 un/Q4 tem forecast = 0.<br>
+        <b>ABC:</b> Classificacao por volume de demanda Q4, thresholds A=70%, B=88%, C=12%.<br>
+        <b>Politica (s,S):</b> s = ceil(mu*L + z*sigma*sqrt(L)), S = ceil(s + mu*review).<br>
+        <b>Pisos Empiricos:</b> Quantis da demanda historica sazonal para evitar valores muito baixos.</p>
+    `;
+
     if (TUNE_DATA.length > 0) {{
-        const byReview = {{}};
-        TUNE_DATA.forEach(d => {{
-            if (!byReview[d.review_days]) byReview[d.review_days] = [];
-            byReview[d.review_days].push(d);
+        var tz = [...new Set(TUNE_DATA.map(d => d.z_value))].sort();
+        var trd = [...new Set(TUNE_DATA.map(d => d.review_days))].sort();
+        var heatmap = trd.map(rd => {{
+            return tz.map(zv => {{
+                var match = TUNE_DATA.find(d => d.z_value === zv && d.review_days === rd);
+                return match ? match.objective : null;
+            }});
         }});
-        const traces = Object.keys(byReview).sort().map(rd => ({{
-            type: 'scatter', mode: 'lines+markers',
-            name: `review=${{rd}}d`,
-            x: byReview[rd].map(d => d.z_value),
-            y: byReview[rd].map(d => d.avg_inventory_value),
-            line: {{width: 2}},
-        }}));
-        Plotly.newPlot('chart-grid', traces, {{
-            margin: {{l: 50, r: 30, t: 10, b: 40}}, height: 300,
-            xaxis: {{title: 'z_value'}}, yaxis: {{title: 'Estoque Médio (R$)'}},
-            legend: {{orientation: 'h', y: -0.2}},
-            hovermode: 'x unified',
-            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-        }}, {{responsive: true, displayModeBar: false}});
-    }}
-
-    // Weekly chart
-    const wkDates = WEEKLY_DATA.map(d => 'Sem ' + d.week);
-    Plotly.newPlot('chart-weekly', [
-        {{type: 'bar', name: 'Real', x: wkDates, y: WEEKLY_DATA.map(d => d.demand), marker: {{color: '#302b63'}}}},
-        {{type: 'bar', name: 'Forecast', x: wkDates, y: WEEKLY_DATA.map(d => d.forecast), marker: {{color: 'rgba(0,212,170,0.6)'}}}},
-    ], {{
-        barmode: 'group', margin: {{l: 50, r: 30, t: 10, b: 40}}, height: 280,
-        yaxis: {{title: 'Unidades'}},
-        legend: {{orientation: 'h', y: -0.2}},
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    }}, {{responsive: true, displayModeBar: false}});
-
-    // Policy table
-    const sorted = [...SKU_DATA].filter(d => d.total_actual_demand > 0).sort((a,b) => b.total_actual_demand - a.total_actual_demand).slice(0, 15);
-    const table = document.getElementById('policy-table');
-    table.innerHTML = `
-        <tr><th>SKU</th><th>Produto</th><th>Loja</th><th>s</th><th>S</th><th>Demanda</th><th>SL</th><th>Estoque</th></tr>
-        ${{sorted.map(r => `
-            <tr>
-                <td class="num">${{r.product}}</td>
-                <td>${{r.product_name ? r.product_name.substring(0, 28) : ''}}</td>
-                <td class="num">${{r.location}}</td>
-                <td class="num"><strong>${{r.reorder_point_s}}</strong></td>
-                <td class="num"><strong>${{r.order_up_to_S}}</strong></td>
-                <td class="num">${{r.total_actual_demand}}</td>
-                <td><span class="badge-sl ${{r.service_level >= 0.99 ? 'high' : r.service_level >= 0.92 ? 'medium' : 'low'}}">${{(r.service_level*100).toFixed(1)}}%</span></td>
-                <td class="num">R$ ${{r.avg_inventory_value.toFixed(2)}}</td>
-            </tr>
-        `).join('')}}
-    `;
-}}
-
-// =========================================================
-// SIMULATION ANIMATION
-// =========================================================
-let animData = [];
-let animIndex = 0;
-let animInterval = null;
-let isPlaying = false;
-let currentSKU = '18064_1314';
-
-function getData() {{
-    const parts = currentSKU.split('_');
-    const prod = parseInt(parts[0]);
-    const loc = parseInt(parts[1]);
-    if (prod === 18064 && loc === 1314) return HERO_DATA;
-    return HERO2_DATA;
-}}
-
-function initAnimation() {{
-    animIndex = 0;
-    if (animInterval) {{
-        clearInterval(animInterval);
-        animInterval = null;
-    }}
-    isPlaying = false;
-    document.getElementById('btn-play').textContent = '▶ Play';
-    document.getElementById('btn-play').className = 'btn-play';
-    drawAnimationFrame(0);
-    drawFlowChart();
-    drawDemandChart();
-}}
-
-function togglePlay() {{
-    if (isPlaying) {{
-        clearInterval(animInterval);
-        animInterval = null;
-        isPlaying = false;
-        document.getElementById('btn-play').textContent = '▶ Play';
-        document.getElementById('btn-play').className = 'btn-play';
-    }} else {{
-        isPlaying = true;
-        document.getElementById('btn-play').textContent = '⏸ Pause';
-        document.getElementById('btn-play').className = 'btn-pause';
-        const speed = parseInt(document.getElementById('speed-select').value);
-        animInterval = setInterval(() => {{
-            animIndex++;
-            if (animIndex >= getData().length) {{
-                animIndex = getData().length - 1;
-                clearInterval(animInterval);
-                animInterval = null;
-                isPlaying = false;
-                document.getElementById('btn-play').textContent = '▶ Play';
-                document.getElementById('btn-play').className = 'btn-play';
-            }}
-            drawAnimationFrame(animIndex);
-        }}, speed);
+        Plotly.newPlot('chart-tune', [{{
+            z: heatmap, x: tz, y: trd, type:'heatmap',
+            colorscale: [[0,'#00b894'],[0.5,'#fdcb6e'],[1,'#e17055']],
+            text: heatmap.map(r => r.map(v => v ? v.toFixed(1) : '-')),
+            texttemplate: '%{{text}}', textfont: {{ size:11 }},
+        }}], {{
+            title: 'Grid Search: Objective por (z, review_days)', margin: {{ t:40, r:20, b:40, l:50 }},
+            xaxis: {{ title:'z value' }}, yaxis: {{ title:'review_days' }},
+        }}, {{ responsive: true }});
     }}
 }}
 
-function resetAnimation() {{
-    if (animInterval) {{
-        clearInterval(animInterval);
-        animInterval = null;
-    }}
-    isPlaying = false;
-    animIndex = 0;
-    document.getElementById('btn-play').textContent = '▶ Play';
-    document.getElementById('btn-play').className = 'btn-play';
-    drawAnimationFrame(0);
-}}
-
-function changeSKU() {{
-    currentSKU = document.getElementById('sku-select').value;
-    resetAnimation();
-    drawFlowChart();
-    drawDemandChart();
-}}
-
-function updateChartType() {{
-    drawAnimationFrame(animIndex);
-}}
-
-function drawAnimationFrame(idx) {{
-    const data = getData();
-    if (!data.length) return;
-    const showAll = idx >= data.length - 1;
-    const endIdx = showAll ? data.length - 1 : idx;
-    const slice = data.slice(0, endIdx + 1);
-
-    // Update counters
-    document.getElementById('day-counter').textContent = endIdx + 1;
-    document.getElementById('day-total').textContent = data.length;
-    document.getElementById('date-display').textContent = data[endIdx].date_str;
-    document.getElementById('inv-display').textContent = data[endIdx].ending_inventory.toFixed(0);
-    document.getElementById('value-display').textContent = data[endIdx].simulated_inventory_value.toFixed(2);
-
-    const badge = document.getElementById('stockout-badge');
-    if (data[endIdx].lost_sales_units > 0) {{
-        badge.style.display = 'inline-block';
-    }} else {{
-        badge.style.display = 'none';
-    }}
-
-    const chartType = document.getElementById('chart-type').value;
-    const isValue = chartType === 'value';
-
-    const simY = slice.map(d => isValue ? d.simulated_inventory_value : d.ending_inventory);
-    const actY = slice.map(d => isValue ? (d.actual_inventory_value || 0) : (d.actual_balance || 0));
-    const dates = slice.map(d => d.date_str);
-
-    // Markers for received qty
-    const recvX = [], recvY = [];
-    slice.forEach((d, i) => {{
-        if (d.received_qty > 0) {{
-            recvX.push(d.date_str);
-            recvY.push(isValue ? d.simulated_inventory_value : d.ending_inventory);
-        }}
-    }});
-
-    // Markers for lost sales
-    const lostX = [], lostY = [];
-    slice.forEach((d, i) => {{
-        if (d.lost_sales_units > 0) {{
-            lostX.push(d.date_str);
-            lostY.push(isValue ? d.simulated_inventory_value : d.ending_inventory);
-        }}
-    }});
-
-    // Markers for order placed
-    const ordX = [], ordY = [];
-    slice.forEach((d, i) => {{
-        if (d.order_qty > 0) {{
-            ordX.push(d.date_str);
-            const yVal = isValue ? d.simulated_inventory_value : d.inventory_position_before_order;
-            ordY.push(yVal);
-        }}
-    }});
-
-    const traces = [
-        {{type: 'scatter', mode: 'lines', name: 'Simulado', x: dates, y: simY, line: {{color: '#302b63', width: 2.5}}}},
-        {{type: 'scatter', mode: 'lines', name: 'Real (histórico)', x: dates, y: actY, line: {{color: '#e17055', width: 2, dash: 'dot'}}}},
-        {{type: 'scatter', mode: 'markers', name: '📦 Entrega', x: recvX, y: recvY, marker: {{color: '#00b894', size: 12, symbol: 'triangle-down'}}}},
-        {{type: 'scatter', mode: 'markers', name: '📝 Pedido', x: ordX, y: ordY, marker: {{color: '#0984e3', size: 10, symbol: 'triangle-up'}}}},
-        {{type: 'scatter', mode: 'markers', name: '⚠️ Ruptura', x: lostX, y: lostY, marker: {{color: '#e17055', size: 14, symbol: 'x'}}}},
-    ];
-
-    const layout = {{
-        margin: {{l: 50, r: 30, t: 10, b: 50}},
-        xaxis: {{title: 'Data', tickangle: -45, tickfont: {{size: 10}}}},
-        yaxis: {{title: isValue ? 'Valor (R$)' : 'Unidades'}},
-        showlegend: true,
-        legend: {{orientation: 'h', y: -0.25, font: {{size: 11}}}},
-        hovermode: 'x unified',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
-    }};
-
-    Plotly.react('chart-animation', traces, layout, {{responsive: true, displayModeBar: false}});
-}}
-
-function drawFlowChart() {{
-    const data = getData();
-    const slice = data.slice(0, Math.min(30, data.length));
-
-    Plotly.newPlot('chart-flow', [
-        {{type: 'bar', name: 'Pedidos', x: slice.map(d => d.date_str), y: slice.map(d => d.order_qty || 0), marker: {{color: '#0984e3'}}}},
-        {{type: 'bar', name: 'Entregas', x: slice.map(d => d.date_str), y: slice.map(d => d.received_qty || 0), marker: {{color: '#00b894'}}}},
-    ], {{
-        barmode: 'group', margin: {{l: 40, r: 20, t: 10, b: 50}}, height: 250,
-        xaxis: {{tickangle: -45, tickfont: {{size: 9}}}},
-        legend: {{orientation: 'h', y: -0.3}},
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    }}, {{responsive: true, displayModeBar: false}});
-}}
-
-function drawDemandChart() {{
-    const data = getData();
-    const slice = data.slice(0, Math.min(30, data.length));
-
-    Plotly.newPlot('chart-demand', [
-        {{type: 'scatter', mode: 'lines+markers', name: 'Demanda Real', x: slice.map(d => d.date_str), y: slice.map(d => d.actual_demand || 0), line: {{color: '#e17055', width: 2}}, marker: {{size: 6}}}},
-        {{type: 'scatter', mode: 'lines+markers', name: 'Atendido', x: slice.map(d => d.date_str), y: slice.map(d => d.fulfilled_units || 0), line: {{color: '#00b894', width: 2}}, marker: {{size: 6}}}},
-    ], {{
-        margin: {{l: 40, r: 20, t: 10, b: 50}}, height: 250,
-        xaxis: {{tickangle: -45, tickfont: {{size: 9}}}},
-        legend: {{orientation: 'h', y: -0.3}},
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    }}, {{responsive: true, displayModeBar: false}});
-}}
-
-// Init
-drawBusinessCharts();
-drawTechnicalCharts();
-setTimeout(initAnimation, 500);
+// ============ INIT ============
+drawOverview();
 </script>
 </body>
-</html>'''
+</html>"""
 
-with open("dashboard.html", "w", encoding="utf-8") as f:
-    f.write(html)
+    OUT_HTML.write_text(html, encoding="utf-8")
+    print(f"Dashboard generated: {OUT_HTML}")
+    print(f"  Total SKU-location pairs: {len(sku)}")
+    print(f"  SL: {perc(sl)}")
+    print(f"  Avg inventory: {brl(avg_inv)}")
+    print(f"  Forecast: {fc_units:.0f} un")
+    print(f"  Actual demand: {act_units:.0f} un")
+    print(f"  Lost sales: {lost_u} un")
 
-print("[OK] dashboard.html generated successfully")
-print(f"   File size: {len(html.encode('utf-8')) / 1024:.0f} KB")
-print("   Open in browser to view")
+if __name__ == "__main__":
+    generate_dashboard()

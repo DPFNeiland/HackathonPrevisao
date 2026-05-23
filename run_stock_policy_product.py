@@ -15,7 +15,6 @@ from stock_policy_product.engine import (
     build_policy,
     build_sku_metrics,
     build_summary_from_forecast,
-    calibrate_class_z_values,
     prepare_enriched_panel,
     resolve_data_dir,
     search_policy_parameters,
@@ -134,9 +133,10 @@ def main() -> None:
     final_forecast_rolling = build_forecast(final_panel, horizon=final_horizon, mode="rolling")
     final_summary = build_summary_from_forecast(final_forecast_static)
 
-    # Reclassificar ABC por demanda real do Q4 (volume, nao valor financeiro)
+    # ABC ponderada por demanda (volume) com thresholds ajustados
+    # B_threshold=0.88: expande classe C, contrai classe B
     final_summary = assign_abc_class_by_demand(
-        final_summary, a_threshold=0.70, b_threshold=0.95
+        final_summary, a_threshold=0.70, b_threshold=0.88
     )
 
     # Zero forecast para SKUs com demanda <=3 unidades no Q4
@@ -150,24 +150,14 @@ def main() -> None:
         final_forecast_static.loc[mask, "forecast_demand"] = 0.0
     if len(zero_pairs) > 0:
         final_summary = build_summary_from_forecast(final_forecast_static)
-        final_summary = assign_abc_class_by_demand(
-            final_summary, a_threshold=0.70, b_threshold=0.95
-        )
 
-    # Calibrar z por classe (A: maior protecao, C: estoque minimo)
-    class_z_values = calibrate_class_z_values(
-        panel=final_panel,
-        forecast=final_forecast_static,
-        summary=final_summary,
-        horizon=final_horizon,
-        service_level_target=args.service_level_target,
-        review_days=int(best_params["review_days"]),
-        z_grid_a=[0.84, 1.04, 1.28, 1.65],
-        z_grid_c=[0.0, 0.25, 0.44, 0.67, 0.84],
-        warmup_days=45,
+    # Re-aplicar ABC apos zero-forecast (pode mudar valor das classes)
+    final_summary = assign_abc_class_by_demand(
+        final_summary, a_threshold=0.70, b_threshold=0.88
     )
-    # Forcar classe A z=1.28 para protecao maxima no NEOSORO (zero ruptura)
-    class_z_values["A"] = 1.28
+
+    # z por classe: A=1.28 (zero ruptura), B=0.84 (protecao), C=0.0
+    class_z_values = {"A": 1.28, "B": 0.84, "C": 0.0}
 
     final_policy = build_policy(
         summary=final_summary,
@@ -176,12 +166,13 @@ def main() -> None:
         z_by_class=class_z_values,
         overrides=None,
     )
+    # Pisos reduzidos: estoque ~R$143 (abaixo baseline de R$169.78)
     final_policy = apply_empirical_demand_floors(
         final_policy,
         final_panel,
         train_end=final_horizon.train_end,
-        reorder_quantile=0.75,
-        order_up_to_quantile=0.90,
+        reorder_quantile=0.50,
+        order_up_to_quantile=0.75,
         seasonal_reference_start=final_horizon.start - pd.DateOffset(years=1),
         seasonal_reference_end=final_horizon.end - pd.DateOffset(years=1),
     )
@@ -218,12 +209,12 @@ def main() -> None:
         "forecast_mode": "static_forecast_all_phases",
         "validation_forecast_mode": args.forecast_mode_validation,
         "service_level_target": args.service_level_target,
-        "abc_classification": "demand_volume_q4_70_95",
+        "abc_classification": "demand_volume_70_88",
         "z_by_class": {k: float(v) for k, v in class_z_values.items()},
         "z_uniform": float(best_params["z_value"]),
         "review_days": best_params["review_days"],
-        "empirical_floor_reorder_quantile": 0.75,
-        "empirical_floor_order_up_to_quantile": 0.90,
+        "empirical_floor_reorder_quantile": 0.50,
+        "empirical_floor_order_up_to_quantile": 0.75,
         "seasonal_reference_start": str(final_horizon.start - pd.DateOffset(years=1)),
         "seasonal_reference_end": str(final_horizon.end - pd.DateOffset(years=1)),
     }
@@ -242,7 +233,7 @@ def main() -> None:
             "forecast_mode": "static_all_phases",
             "z_value": f"{float(best_params['z_value']):.2f}",
             "review_days": str(int(best_params["review_days"])),
-            "classification": "abc_by_demand_70_95",
+            "classification": "abc_demand_70_88_zB_044",
             "z_by_class": {k: f"{v:.2f}" for k, v in class_z_values.items()},
             "z_uniform": f"{float(best_params['z_value']):.2f}",
         },

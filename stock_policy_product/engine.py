@@ -416,6 +416,27 @@ def assign_abc_class_by_demand(
     return result.drop(columns=["cumulative_share"])
 
 
+def assign_abc_class_by_value(
+    summary: pd.DataFrame,
+    *,
+    a_threshold: float = 0.80,
+    b_threshold: float = 0.95,
+) -> pd.DataFrame:
+    result = summary.sort_values("forecast_value_period", ascending=False).copy()
+    total_value = result["forecast_value_period"].sum()
+    if total_value <= 0:
+        result["abc_class"] = "C"
+        return result
+    result["cumulative_share"] = result["forecast_value_period"].cumsum() / total_value
+    result["abc_class"] = np.where(
+        result["cumulative_share"] <= a_threshold, "A",
+        np.where(result["cumulative_share"] <= b_threshold, "B", "C"),
+    )
+    if len(result) > 0:
+        result.loc[result.index[0], "abc_class"] = "A"
+    return result.drop(columns=["cumulative_share"])
+
+
 def build_summary_from_forecast(forecast: pd.DataFrame) -> pd.DataFrame:
     summary = (
         forecast.groupby(
