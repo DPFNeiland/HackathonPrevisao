@@ -7,10 +7,14 @@
   "forecast_mode": "static_forecast_all_phases",
   "validation_forecast_mode": "static",
   "service_level_target": 0.92,
-  "local_service_level_target": 0.97,
-  "z_value": 0.84,
+  "abc_classification": "demand_volume_q4_70_95",
+  "z_by_class": {
+    "B": 0.84,
+    "A": 1.28,
+    "C": 0.0
+  },
+  "z_uniform": 0.84,
   "review_days": 7,
-  "local_override_count": 57,
   "empirical_floor_reorder_quantile": 0.75,
   "empirical_floor_order_up_to_quantile": 0.9,
   "seasonal_reference_start": "2023-10-01 00:00:00",

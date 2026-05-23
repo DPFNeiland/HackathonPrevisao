@@ -1,48 +1,86 @@
-# Pitch de 5 Slides
+# Pitch de 5 Slides — Política de Reposição (s, S)
 
-## Slide 1 - Problema e objetivo
+---
 
-- Desafio: decidir quanto pedir e quando pedir para cada `SKU x loja` no periodo de `2024-10-01` a `2024-12-31`.
-- Objetivo de negocio: reduzir ruptura sem deixar capital demais parado em estoque.
-- Restricoes principais: sem olhar o futuro, respeitando lead time de `3 dias` para a loja `841` e `9 dias` para a loja `1314`.
+## Slide 1 — Problema e Objetivo
 
-## Slide 2 - Estrategia usada
+**Problema:** 29 SKUs de Gripe e Resfriado em 2 lojas com lead times diferentes (3 vs 9 dias). Decidir quanto e quando pedir para cada par SKU × loja no Q4/2024.
 
-- Forecast diario por `SKU x loja` usando apenas historico ate `2024-09-30`.
-- Ajustes de demanda para:
-- dias de ruptura, tratando venda observada como demanda censurada.
-- campanhas promocionais, usando `4_campanhas.csv` e `5_produtos_locais_campanhas.csv`.
-- Politica de reposicao `(s, S)`:
-- `s` = ponto de reposicao para acionar pedido.
-- `S` = nivel alvo de estoque apos o pedido chegar.
+**Objetivo:** Nível de serviço ≥ 92% com mínimo capital parado em estoque.
 
-## Slide 3 - Resultado de negocio
+**Restrições:**
+- Sem olhar o futuro (backtest temporal — treino até 30/09/2024)
+- Lead time CD→loja: 841=Ceres/GO (3d), 1314=Corumbá/MS (9d)
+- Pedido no dia d chega em d+LT; usar posição de estoque (físico + trânsito)
 
-- Nivel de servico: `[preencher com KPI final]`.
-- Capital medio em estoque: `R$ [preencher]`.
-- Custo total de reposicao: `R$ [preencher]`.
-- Comparacao com baseline da casa:
-- economia de capital: `R$ [preencher]`.
-- reducao de ruptura: `[preencher] p.p.`.
-- mensagem principal: nossa politica melhora disponibilidade com menor ou controlado capital parado.
+---
 
-## Slide 4 - Exemplo de 1 SKU bem narrado
+## Slide 2 — Estratégia
 
-- Escolher 1 SKU relevante, de preferencia o `18064`, porque ele concentra muito volume.
-- Mostrar grafico com:
-- estoque real no Q4/2024.
-- estoque simulado com a politica proposta.
-- linha de pedidos emitidos e recebidos.
-- Narrativa sugerida:
-- onde houve risco de ruptura.
-- como o ponto `s` antecipou a reposicao.
-- como o `S` evitou excesso de estoque.
+**Pipeline:** 8 CSVs → Painel Diário → Forecast → Política (s,S) → Simulação → KPIs
 
-## Slide 5 - Conclusao e proximos passos
+**Forecast por SKU × loja:**
+- Média ponderada 3 pesos (7d, 28d, sazonal Q4/2023) + ajuste dia da semana
+- Uplift promocional por campanha
+- Correção de censura (dias com estoque=0)
 
-- O que funcionou: politica simples, explicavel e calibrada por backtest.
-- O que melhorariamos com mais tempo:
-- simulacao completa fornecedor -> CD -> loja.
-- calibracao mais fina por SKU ABC.
-- modelos mais fortes para promocao e sazonalidade.
-- Fechamento: o melhor resultado veio de combinar forecast defensavel com politica operacional consistente.
+**Política (s, S):**
+- `s = ceil(μ × LT + z × σ × √LT)` — ponto de pedido
+- `S = ceil(s + μ × review_cover_days)` — nível-alvo
+- Calibração: grid search z × review_days no simulador
+- **Parâmetros finais:** z=0,84, review=7d (vs 5d inicial), piso empírico 75%
+
+---
+
+## Slide 3 — Resultados Consolidados
+
+| Métrica | Real (loja) | Simulado | Δ |
+|---------|:----------:|:--------:|:-:|
+| Nível de serviço | 99,14% | **99,94%** | +0,8 pp |
+| Estoque médio | R$ 163,27 | **R$ 169,78** | +R$ 6,51 |
+| Custo total de reposição | — | **R$ 2.629,55** | — |
+| Pedidos emitidos | — | **113** | — |
+| Vendas perdidas | — | **3 un (R$ 233,72)** | — |
+
+NS ≥ 92% ✅ — 3 rupturas em 5.336 dias-operacionais (todas em SKUs de alto valor: NEOSORO 841, ABRILAR 1314)
+
+**Diagnóstico-chave:** Forecast 51% acima do real (1.845 vs 1.225 un). Custo do excesso: R$ 1.927/trim — 8× maior que o custo da ruptura (R$ 234).
+
+---
+
+## Slide 4 — Caso NEOSORO (SKU 18064) — 78% da Demanda
+
+**Loja 841 (Ceres, LT=3d):**
+- Demanda Q4: 103 un | s=11 | S=33
+- 1 ruptura simulada (dia 19/10 — estoque zerou, 1 un perdida)
+- Capital médio: R$ 169,52 (vs real R$ 177,81)
+
+**Loja 1314 (Corumbá, LT=9d):**
+- Demanda Q4: 854 un | s=180 | S=339
+- 0 rupturas, 5 pedidos no trimestre
+- Capital médio: R$ 1.495 (vs real R$ 665)
+- Safety stock elevado (96,5 un) devido a LT=9d + forecast inflado em +57%
+
+**Insight:** NEOSORO dita KPIs globais. Melhorar seu forecast reduz estoque em R$ 432-864/trim sem perder SL.
+
+---
+
+## Slide 5 — Conclusão e Próximos Passos
+
+**O que funciona:**
+- Política (s,S) atinge 99,94% SL com abordagem defensável e explicável
+- Grid search + simulador validado (100% lead time, 0 estoque negativo)
+- Dashboard interativo com animação dia a dia
+
+**O que fazer agora (ganhos rápidos):**
+
+| Fase | Ação | Impacto |
+|:----:|------|:-------:|
+| 1 | review_days 5→7 (já feito) | −R$ 770/trim |
+| 1 | z 0,84→1,28 | ROI 34,8× (zero ruptura) |
+| 1 | Customizar ABRILAR 1314 + NEOSORO 841 | Protege R$ 2.091 receita |
+| 2 | Corrigir uplift promocional | −R$ 432/trim |
+| 2 | Forecast = 0 para 64% SKUs (≤3 un/Q4) | Elimina estoque parado |
+| 3 | SL diferenciado ABC (A:99,5% B:95% C:90%) | Libera R$ 3.839 capital |
+
+**Fechamento:** O melhor resultado vem de combinar forecast defensável com política operacional consistente — não de modelos complexos.

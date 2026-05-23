@@ -215,13 +215,13 @@ def compute_promo_uplift(panel: pd.DataFrame, train_end: pd.Timestamp) -> pd.Dat
 
     sku_stats = (
         train.groupby(["location", "product", "is_promo"])
-        .agg(mean_demand=("corrected_demand", "mean"), days=("date", "size"))
+        .agg(median_demand=("corrected_demand", "median"), days=("date", "size"))
         .reset_index()
     )
     sku_pivot = sku_stats.pivot_table(
         index=["location", "product"],
         columns="is_promo",
-        values=["mean_demand", "days"],
+        values=["median_demand", "days"],
         fill_value=np.nan,
     )
     sku_pivot.columns = [f"{a}_{b}" for a, b in sku_pivot.columns]
@@ -229,13 +229,13 @@ def compute_promo_uplift(panel: pd.DataFrame, train_end: pd.Timestamp) -> pd.Dat
 
     store_stats = (
         train.groupby(["location", "is_promo"])
-        .agg(mean_demand=("corrected_demand", "mean"), days=("date", "size"))
+        .agg(median_demand=("corrected_demand", "median"), days=("date", "size"))
         .reset_index()
     )
     store_pivot = store_stats.pivot_table(
         index=["location"],
         columns="is_promo",
-        values=["mean_demand", "days"],
+        values=["median_demand", "days"],
         fill_value=np.nan,
     )
     store_pivot.columns = [f"store_{a}_{b}" for a, b in store_pivot.columns]
@@ -249,21 +249,21 @@ def compute_promo_uplift(panel: pd.DataFrame, train_end: pd.Timestamp) -> pd.Dat
 
     uplift["promo_uplift"] = 1.0
 
-    if "mean_demand_1" in uplift.columns and "mean_demand_0" in uplift.columns:
-        sku_ratio = uplift["mean_demand_1"] / uplift["mean_demand_0"]
+    if "median_demand_1" in uplift.columns and "median_demand_0" in uplift.columns:
+        sku_ratio = uplift["median_demand_1"] / uplift["median_demand_0"]
         sku_valid = (uplift.get("days_1", pd.Series(0)) >= 3) & (uplift.get("days_0", pd.Series(0)) >= 20) & np.isfinite(sku_ratio)
-        uplift.loc[sku_valid, "promo_uplift"] = sku_ratio[sku_valid]
+        uplift.loc[sku_valid, "promo_uplift"] = sku_ratio[sku_valid] ** 0.5
 
-    if "store_mean_demand_1" in uplift.columns and "store_mean_demand_0" in uplift.columns:
-        store_ratio = uplift["store_mean_demand_1"] / uplift["store_mean_demand_0"]
+    if "store_median_demand_1" in uplift.columns and "store_median_demand_0" in uplift.columns:
+        store_ratio = uplift["store_median_demand_1"] / uplift["store_median_demand_0"]
         store_valid = (
             (uplift.get("store_days_1", pd.Series(0)) >= 10)
             & (uplift.get("store_days_0", pd.Series(0)) >= 40)
             & np.isfinite(store_ratio)
         )
-        uplift.loc[(uplift["promo_uplift"] == 1.0) & store_valid, "promo_uplift"] = store_ratio[store_valid]
+        uplift.loc[(uplift["promo_uplift"] == 1.0) & store_valid, "promo_uplift"] = store_ratio[store_valid] ** 0.5
 
-    uplift["promo_uplift"] = uplift["promo_uplift"].clip(lower=1.0, upper=2.5).fillna(1.0)
+    uplift["promo_uplift"] = uplift["promo_uplift"].clip(lower=1.0, upper=2.0).fillna(1.0)
     return uplift[["location", "product", "promo_uplift"]]
 
 
@@ -394,6 +394,28 @@ def assign_abc_class(summary: pd.DataFrame) -> pd.DataFrame:
     return summary.drop(columns=["cumulative_share"])
 
 
+def assign_abc_class_by_demand(
+    summary: pd.DataFrame,
+    *,
+    a_threshold: float = 0.70,
+    b_threshold: float = 0.95,
+) -> pd.DataFrame:
+    result = summary.sort_values("total_observed_period", ascending=False).copy()
+    total_demand = result["total_observed_period"].sum()
+    if total_demand <= 0:
+        result["abc_class"] = "C"
+        return result
+    result["cumulative_share"] = result["total_observed_period"].cumsum() / total_demand
+    result["abc_class"] = np.where(
+        result["cumulative_share"] <= a_threshold, "A",
+        np.where(result["cumulative_share"] <= b_threshold, "B", "C"),
+    )
+    # Garantia: o SKU de maior demanda e sempre A
+    if len(result) > 0:
+        result.loc[result.index[0], "abc_class"] = "A"
+    return result.drop(columns=["cumulative_share"])
+
+
 def build_summary_from_forecast(forecast: pd.DataFrame) -> pd.DataFrame:
     summary = (
         forecast.groupby(
@@ -433,6 +455,7 @@ def build_policy(
     z_value: float,
     review_days: int,
     *,
+    z_by_class: dict[str, float] | None = None,
     min_active_stock: int = 1,
     minimum_presentation_stock: int = 1,
     overrides: pd.DataFrame | None = None,
@@ -440,6 +463,10 @@ def build_policy(
     policy = summary.copy()
     policy["z_value"] = float(z_value)
     policy["review_days"] = int(review_days)
+
+    # Apply class-based z sobre o valor global (antes dos overrides locais)
+    if z_by_class is not None and "abc_class" in policy.columns:
+        policy["z_value"] = policy["abc_class"].map(z_by_class).fillna(policy["z_value"])
 
     if overrides is not None and not overrides.empty:
         override_cols = ["location", "product", "z_value", "review_days"]
@@ -957,6 +984,88 @@ def compute_policy_objective(
         + metrics["total_ordering_cost"] / max(metrics["horizon_days"], 1)
         + max(0.0, service_level_target - metrics["service_level"]) * service_penalty_scale
     )
+
+
+def calibrate_single_class_z(
+    panel: pd.DataFrame,
+    forecast: pd.DataFrame,
+    summary: pd.DataFrame,
+    horizon: Horizon,
+    service_level_target: float,
+    z_grid: list[float],
+    review_days: int,
+    class_label: str,
+    base_z_by_class: dict[str, float],
+    *,
+    warmup_days: int = 45,
+) -> tuple[float, dict[str, float]]:
+    best_z = base_z_by_class.get(class_label, 1.28)
+    best_objective = float("inf")
+    best_metrics: dict[str, float] | None = None
+
+    for z_value in z_grid:
+        trial_z = dict(base_z_by_class)
+        trial_z[class_label] = z_value
+        policy = build_policy(
+            summary,
+            z_value=0.0,
+            review_days=review_days,
+            z_by_class=trial_z,
+            overrides=None,
+        )
+        sim = simulate_policy(panel, forecast=forecast, policy=policy, horizon=horizon, warmup_days=warmup_days)
+        metrics = build_overall_metrics(sim)
+        objective = compute_policy_objective(metrics, service_level_target)
+        if objective < best_objective:
+            best_objective = objective
+            best_z = z_value
+            best_metrics = metrics
+
+    result = dict(base_z_by_class)
+    result[class_label] = best_z
+    return best_z, result
+
+
+def calibrate_class_z_values(
+    panel: pd.DataFrame,
+    forecast: pd.DataFrame,
+    summary: pd.DataFrame,
+    horizon: Horizon,
+    service_level_target: float,
+    review_days: int,
+    *,
+    z_grid_a: list[float] | None = None,
+    z_grid_c: list[float] | None = None,
+    warmup_days: int = 45,
+) -> dict[str, float]:
+    if z_grid_a is None:
+        z_grid_a = [0.84, 1.04, 1.28, 1.65, 2.05]
+    if z_grid_c is None:
+        z_grid_c = [0.0, 0.25, 0.44, 0.67, 0.84]
+
+    z_by_class: dict[str, float] = {"B": 0.84}
+
+    # Step 1: calibrate class A z keeping B at baseline and C at 0
+    a_class_skus = summary[summary["abc_class"] == "A"]
+    if len(a_class_skus) > 0:
+        z_A, z_by_class = calibrate_single_class_z(
+            panel, forecast, summary, horizon, service_level_target,
+            z_grid_a, review_days, "A", z_by_class, warmup_days=warmup_days,
+        )
+    else:
+        z_by_class["A"] = 0.84
+
+    # Step 2: calibrate class C z keeping A and B fixed
+    c_class_skus = summary[summary["abc_class"] == "C"]
+    if len(c_class_skus) > 0:
+        z_C, z_by_class = calibrate_single_class_z(
+            panel, forecast, summary, horizon, service_level_target,
+            z_grid_c, review_days, "C", z_by_class, warmup_days=warmup_days,
+        )
+    else:
+        z_by_class["C"] = 0.0
+
+    return z_by_class
 
 
 def tune_local_sku_overrides(

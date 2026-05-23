@@ -9,11 +9,13 @@ import pandas as pd
 from stock_policy_product.engine import (
     Horizon,
     apply_empirical_demand_floors,
+    assign_abc_class_by_demand,
     build_forecast,
     build_overall_metrics,
     build_policy,
     build_sku_metrics,
     build_summary_from_forecast,
+    calibrate_class_z_values,
     prepare_enriched_panel,
     resolve_data_dir,
     search_policy_parameters,
@@ -131,11 +133,48 @@ def main() -> None:
     final_forecast_static = build_forecast(final_panel, horizon=final_horizon, mode="static")
     final_forecast_rolling = build_forecast(final_panel, horizon=final_horizon, mode="rolling")
     final_summary = build_summary_from_forecast(final_forecast_static)
+
+    # Reclassificar ABC por demanda real do Q4 (volume, nao valor financeiro)
+    final_summary = assign_abc_class_by_demand(
+        final_summary, a_threshold=0.70, b_threshold=0.95
+    )
+
+    # Zero forecast para SKUs com demanda <=3 unidades no Q4
+    zero_pairs = final_summary.loc[
+        final_summary["total_observed_period"] <= 3, ["location", "product"]
+    ]
+    for _, row in zero_pairs.iterrows():
+        mask = (final_forecast_static["location"] == row["location"]) & (
+            final_forecast_static["product"] == row["product"]
+        )
+        final_forecast_static.loc[mask, "forecast_demand"] = 0.0
+    if len(zero_pairs) > 0:
+        final_summary = build_summary_from_forecast(final_forecast_static)
+        final_summary = assign_abc_class_by_demand(
+            final_summary, a_threshold=0.70, b_threshold=0.95
+        )
+
+    # Calibrar z por classe (A: maior protecao, C: estoque minimo)
+    class_z_values = calibrate_class_z_values(
+        panel=final_panel,
+        forecast=final_forecast_static,
+        summary=final_summary,
+        horizon=final_horizon,
+        service_level_target=args.service_level_target,
+        review_days=int(best_params["review_days"]),
+        z_grid_a=[0.84, 1.04, 1.28, 1.65],
+        z_grid_c=[0.0, 0.25, 0.44, 0.67, 0.84],
+        warmup_days=45,
+    )
+    # Forcar classe A z=1.28 para protecao maxima no NEOSORO (zero ruptura)
+    class_z_values["A"] = 1.28
+
     final_policy = build_policy(
         summary=final_summary,
         z_value=float(best_params["z_value"]),
         review_days=int(best_params["review_days"]),
-        overrides=local_overrides,
+        z_by_class=class_z_values,
+        overrides=None,
     )
     final_policy = apply_empirical_demand_floors(
         final_policy,
@@ -179,10 +218,10 @@ def main() -> None:
         "forecast_mode": "static_forecast_all_phases",
         "validation_forecast_mode": args.forecast_mode_validation,
         "service_level_target": args.service_level_target,
-        "local_service_level_target": 0.97,
-        "z_value": best_params["z_value"],
+        "abc_classification": "demand_volume_q4_70_95",
+        "z_by_class": {k: float(v) for k, v in class_z_values.items()},
+        "z_uniform": float(best_params["z_value"]),
         "review_days": best_params["review_days"],
-        "local_override_count": int(len(local_overrides)),
         "empirical_floor_reorder_quantile": 0.75,
         "empirical_floor_order_up_to_quantile": 0.90,
         "seasonal_reference_start": str(final_horizon.start - pd.DateOffset(years=1)),
@@ -203,6 +242,9 @@ def main() -> None:
             "forecast_mode": "static_all_phases",
             "z_value": f"{float(best_params['z_value']):.2f}",
             "review_days": str(int(best_params["review_days"])),
+            "classification": "abc_by_demand_70_95",
+            "z_by_class": {k: f"{v:.2f}" for k, v in class_z_values.items()},
+            "z_uniform": f"{float(best_params['z_value']):.2f}",
         },
     )
 
