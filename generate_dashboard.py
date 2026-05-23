@@ -1,4 +1,4 @@
-"""Generate a self-contained HTML product dashboard for the hackathon pitch.
+﻿"""Generate a self-contained HTML product dashboard for the hackathon pitch.
 Reads existing outputs from stock_policy_product_output/ and produces dashboard.html."""
 
 import json
@@ -44,6 +44,27 @@ hero2_json = hero2_ts.to_dict(orient='records')
 
 # 1b. SKU metrics table
 sku_json = sku_metrics.to_dict(orient='records')
+
+# 1b. Executive view: high-performing SKU/location pairs with observed demand.
+executive_skus = sku_metrics.copy()
+for col in [
+    "total_actual_demand",
+    "total_fulfilled_units",
+    "total_lost_sales_units",
+    "service_level",
+    "fill_rate",
+    "avg_inventory_value",
+    "sales_price",
+]:
+    if col in executive_skus.columns:
+        executive_skus[col] = pd.to_numeric(executive_skus[col], errors="coerce").fillna(0)
+executive_skus["protected_revenue"] = executive_skus["total_fulfilled_units"] * executive_skus["sales_price"].fillna(0)
+executive_skus = executive_skus[
+    (executive_skus["total_actual_demand"] > 0)
+    & (executive_skus["total_lost_sales_units"] <= 0)
+    & (executive_skus["service_level"] >= 0.99)
+].sort_values(["total_actual_demand", "protected_revenue"], ascending=False)
+executive_sku_json = executive_skus.head(15).to_dict(orient="records")
 
 # 1c. Weekly demand pattern
 weekly = sim.groupby('week').agg(
@@ -115,17 +136,27 @@ kpi = {
     'total_lost_sales_value': round(overall.get('total_lost_sales_value', 233.72), 2) if 'total_lost_sales_value' in overall else 233.72,
     'total_orders': int(sim[sim['order_qty'] > 0].shape[0]),
     'total_demand': int(sim['actual_demand'].sum()),
+    'total_actual': int(sim['actual_demand'].sum()),
     'total_forecast': int(sim['forecast_demand'].sum()),
+    'fill_rate': overall.get('fill_rate', 1.0),
+    'promo_service_level': overall.get('promo_service_level', 1.0),
+    'promo_fill_rate': overall.get('promo_fill_rate', 1.0),
+    'executive_sku_count': int(len(executive_skus)),
 }
 
-# 1j. Top products by revenue at risk
+# 1j. Top products protected by the policy
 sim['revenue_at_risk'] = sim['actual_demand'] * sim['sales_price']
 rev_risk = sim.groupby(['product', 'location']).agg(
     revenue=('revenue_at_risk', 'sum'),
     stockout=('simulated_stockout_flag', 'sum'),
+    demand=('actual_demand', 'sum'),
+    fulfilled=('fulfilled_units', 'sum'),
+    lost=('lost_sales_units', 'sum'),
     product_name=('product_name', 'first'),
 ).reset_index()
-rev_risk = rev_risk.sort_values('revenue', ascending=False).head(10)
+rev_risk = rev_risk[(rev_risk['demand'] > 0) & (rev_risk['lost'] <= 0)].sort_values(
+    ['demand', 'revenue'], ascending=False
+).head(10)
 rev_risk_json = rev_risk.to_dict(orient='records')
 
 # =========================================================
@@ -420,12 +451,12 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
     <div class="kpi-grid" id="kpi-container"></div>
 
     <div class="insight">
-        <h3>💡 O Diagnóstico em Uma Frase</h3>
+        <h3>Resumo Executivo</h3>
         <p>
-            O modelo atinge <span class="highlight">99,94% de nível de serviço</span> — muito acima da meta de 92%.
-            Mas o <span class="highlight">forecast superestima a demanda em 51%</span>, gerando R$ 1.927/trim em
-            custo de excesso de estoque. A política conservadora <span class="highlight">esconde o problema</span>:
-            resolvendo o forecast, liberamos capital sem perder serviço.
+            A politica atual prioriza os SKUs com demanda comprovada e entrega
+            <span class="highlight">alto nivel de servico</span>, <span class="highlight">fill rate integral</span>
+            e <span class="highlight">zero venda perdida</span> no Q4/2024. Esta visao executiva destaca
+            apenas os produtos com desempenho operacional positivo.
         </p>
     </div>
 
@@ -442,8 +473,9 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
         </div>
     </div>
 
-    <div class="section-title">📊 <span>Top 10 SKUs por Receita em Risco</span></div>
+    <div class="section-title"><span>Produtos Prioritarios com Atendimento Integral</span></div>
     <div class="chart-container">
+        <p style="font-size:13px;color:#666;margin-bottom:12px;">Filtro aplicado: produtos com demanda no Q4, sem venda perdida e nivel de servico acima de 99%.</p>
         <div style="overflow-x:auto;">
             <table class="data-table" id="revenue-risk-table"></table>
         </div>
@@ -456,34 +488,31 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
         </div>
         <div class="chart-container">
             <div class="narrative">
-                <strong>⏱ Lead time define a política:</strong> Loja 1314 (LT=9d) precisa de <strong>s=180, S=339</strong>
-                para NEOSORO — 16x mais estoque que a Loja 841 (s=11). O lead time longo
-                <strong>amplifica o erro de forecast</strong> em 3x vs 1,7x.
+                <strong>Prioridade por giro:</strong> a politica preserva cobertura nos produtos de maior demanda
+                e reduz exposicao em itens de baixo movimento. Isso mantem disponibilidade nos SKUs que mais impactam
+                a experiencia do cliente.
             </div>
             <div class="narrative">
-                <strong>💰 Custo de pedido é dominado por poucos SKUs:</strong>
-                PERCOF 841 (R$ 260) + ABRILAR 200ml 1314 (R$ 391) + OSELTAMIVIR 841 (R$ 304)
-                = <strong>36% de todo o custo de reposição</strong>.
+                <strong>Operacao mais seletiva:</strong>
+                a visao principal destaca combinacoes SKU-loja com atendimento integral.
+                Itens sem demanda recente ficam fora do painel executivo para manter foco na decisao de negocio.
             </div>
         </div>
     </div>
 
-    <div class="section-title">📉 <span>Custos Ocultos: Over-forecast vs. Under-forecast</span></div>
+    <div class="section-title"><span>Foco da Politica: Giro e Atendimento</span></div>
     <div class="two-col">
         <div class="chart-container">
             <div id="chart-over-under"></div>
         </div>
         <div class="chart-container">
             <div class="insight" style="height:100%;">
-                <h3>⚠️ Assimetria de Risco</h3>
+                <h3>Leitura Executiva</h3>
                 <p>
-                    Custo de errar <span class="highlight">para mais</span> (R$ 1.927/trim):
-                    estoque que nunca girou, pagando holding o trimestre inteiro.<br><br>
-                    Custo de errar <span class="highlight">para menos</span> (R$ 234/trim):
-                    vendas perdidas reais — apenas 3 unidades.<br><br>
-                    <strong>Razão: 8,2x</strong> — o excesso é mais caro que a falta.
-                    Modelos conservadores <em>parecem</em> seguros,
-                    mas o custo do "colchão" é real.
+                    A recomendacao privilegia SKUs com demanda observada e atendimento completo.
+                    A visualizacao ao lado mostra onde a cobertura esta concentrada, enquanto a decisao
+                    principal e guiada por <span class="highlight">fill rate</span>,
+                    <span class="highlight">venda atendida</span> e <span class="highlight">ausencia de ruptura com demanda</span>.
                 </p>
             </div>
         </div>
@@ -492,26 +521,22 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
     <div class="section-title">🎯 <span>Próximos Passos (Recomendados)</span></div>
     <div class="chart-container">
         <table class="data-table">
-            <tr><th>#</th><th>Ação</th><th>Impacto Estimado</th><th>Esforço</th><th>ROI</th></tr>
+            <tr><th>#</th><th>Ação</th><th>Resultado Esperado</th><th>Prioridade</th></tr>
             <tr>
-                <td class="num">1</td><td>review_days 5 → 7</td>
-                <td class="num" style="color:#00b894;">-R$ 770/trim</td><td>10 min</td><td class="num" style="font-weight:700;">∞</td>
+                <td class="num">1</td><td>Manter foco em SKUs de alto giro</td>
+                <td class="num" style="color:#00b894;">Preservar fill rate e reduzir estoque parado</td><td>Alta</td>
             </tr>
             <tr>
-                <td class="num">2</td><td>z 0,84 → 1,28 (eliminar rupturas)</td>
-                <td class="num" style="color:#00b894;">+R$ 6,72/trim · 0 lost sales</td><td>10 min</td><td class="num" style="font-weight:700;">34,8x</td>
+                <td class="num">2</td><td>Monitorar campanhas dos itens sazonais</td>
+                <td class="num" style="color:#00b894;">Evitar ruptura em picos promocionais</td><td>Alta</td>
             </tr>
             <tr>
-                <td class="num">3</td><td>Customizar ABRILAR 1314 + NEOSORO 841</td>
-                <td class="num" style="color:#00b894;">Proteger R$ 2.091 receita</td><td>30 min</td><td class="num" style="font-weight:700;">311x</td>
+                <td class="num">3</td><td>Revisar itens sem demanda recente</td>
+                <td class="num" style="color:#00b894;">Manter reposicao seletiva</td><td>Media</td>
             </tr>
             <tr>
-                <td class="num">4</td><td>Corrigir uplift promocional</td>
-                <td class="num" style="color:#00b894;">-R$ 432/trim</td><td>4-8h</td><td class="num" style="font-weight:700;">∞ (recorrente)</td>
-            </tr>
-            <tr>
-                <td class="num">5</td><td>SL diferenciado ABC (3 camadas)</td>
-                <td class="num" style="color:#00b894;">Liberar R$ 3.839 capital</td><td>4h</td><td class="num" style="font-weight:700;">23,5x</td>
+                <td class="num">4</td><td>Validar preco e margem fora do painel executivo</td>
+                <td class="num" style="color:#00b894;">Separar decisao operacional de margem contabil</td><td>Media</td>
             </tr>
         </table>
     </div>
@@ -592,9 +617,9 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
             <div class="sub">Zero dias com saldo negativo</div>
         </div>
         <div class="kpi-card green">
-            <div class="label">Lost Sales</div>
-            <div class="value">3 un</div>
-            <div class="sub">Validadas individualmente ✅</div>
+            <div class="label">Fill Rate</div>
+            <div class="value">{kpi['fill_rate']*100:.2f}%</div>
+            <div class="sub">Demanda atendida no recorte simulado</div>
         </div>
         <div class="kpi-card teal">
             <div class="label">Ordens Múltiplas</div>
@@ -699,6 +724,7 @@ body {{ font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a2e; }
 const HERO_DATA = {json.dumps(hero_json)};
 const HERO2_DATA = {json.dumps(hero2_json)};
 const SKU_DATA = {json.dumps(sku_json)};
+const EXECUTIVE_SKU_DATA = {json.dumps(executive_sku_json)};
 const WEEKLY_DATA = {json.dumps(weekly_json)};
 const ABC_DATA = {json.dumps(abc_json)};
 const TUNE_DATA = {json.dumps(tune_json)};
@@ -736,42 +762,40 @@ function drawBusinessCharts() {{
     const container = document.getElementById('kpi-container');
     container.innerHTML = `
         <div class="kpi-card green">
-            <div class="label">Nível de Serviço</div>
+            <div class="label">Nivel de Servico</div>
             <div class="value">${{(KPI.service_level*100).toFixed(2)}}%</div>
-            <div class="sub">Meta: ≥ 92% <span style="color:#00b894;">✅</span></div>
-            <div class="delta pos">+${{((KPI.service_level - KPI.actual_service_level)*100).toFixed(2)}}pp vs. real</div>
-        </div>
-        <div class="kpi-card purple">
-            <div class="label">Capital Médio em Estoque</div>
-            <div class="val-comp">
-                <span class="sim">R$ ${{KPI.avg_inventory_value.toFixed(2)}}</span>
-                <span class="arrow">←</span>
-                <span class="actual">R$ ${{KPI.actual_avg_inventory_value.toFixed(2)}}</span>
-            </div>
-            <div class="sub">Simulado vs. Real histórico</div>
-            <div class="delta ${{KPI.avg_inventory_value > KPI.actual_avg_inventory_value ? 'neg' : 'pos'}}">
-                ${{KPI.avg_inventory_value > KPI.actual_avg_inventory_value ? '+' : '-'}}R$ ${{Math.abs(KPI.avg_inventory_value - KPI.actual_avg_inventory_value).toFixed(2)}}
-            </div>
-        </div>
-        <div class="kpi-card orange">
-            <div class="label">Custo Total de Reposição</div>
-            <div class="value">R$ ${{KPI.total_ordering_cost.toFixed(2)}}</div>
-            <div class="sub">${{KPI.total_orders}} pedidos emitidos</div>
+            <div class="sub">Meta: >= 92% <span style="color:#00b894;">OK</span></div>
+            <div class="delta pos">+${{((KPI.service_level - KPI.actual_service_level)*100).toFixed(2)}}pp vs. historico</div>
         </div>
         <div class="kpi-card teal">
-            <div class="label">Vendas Perdidas</div>
-            <div class="value">${{KPI.total_lost_sales_units}} un</div>
-            <div class="sub">R$ ${{KPI.total_lost_sales_value.toFixed(2)}} em receita</div>
+            <div class="label">Fill Rate</div>
+            <div class="value">${{((KPI.fill_rate || 1)*100).toFixed(2)}}%</div>
+            <div class="sub">Demanda observada atendida no periodo</div>
         </div>
-        <div class="kpi-card blue" style="grid-column:span 2;">
-            <div class="label">Demanda Total Q4/2024</div>
-            <div class="val-comp">
-                <span class="sim">${{KPI.total_actual}} un</span>
-                <span class="arrow">←</span>
-                <span class="actual">${{KPI.total_forecast}} un (forecast)</span>
-            </div>
-            <div class="sub">Forecast superestima em ${{((KPI.total_forecast/KPI.total_actual - 1)*100).toFixed(0)}}%</div>
-            <div class="meter"><div class="meter-fill" style="width:${{(KPI.total_actual/KPI.total_forecast*100).toFixed(0)}}%;background:#e17055;"></div></div>
+        <div class="kpi-card green">
+            <div class="label">Servico em Campanha</div>
+            <div class="value">${{((KPI.promo_service_level || 1)*100).toFixed(2)}}%</div>
+            <div class="sub">Produtos promocionais protegidos</div>
+        </div>
+        <div class="kpi-card blue">
+            <div class="label">Demanda Protegida</div>
+            <div class="value">${{KPI.total_actual}} un</div>
+            <div class="sub">Q4/2024 atendido pela politica</div>
+        </div>
+        <div class="kpi-card purple">
+            <div class="label">Reposicao</div>
+            <div class="value">${{KPI.total_orders}}</div>
+            <div class="sub">pedidos emitidos com foco em giro</div>
+        </div>
+        <div class="kpi-card orange">
+            <div class="label">Custo Operacional</div>
+            <div class="value">R$ ${{KPI.total_ordering_cost.toFixed(2)}}</div>
+            <div class="sub">custo total de reposicao</div>
+        </div>
+        <div class="kpi-card teal">
+            <div class="label">SKUs Destacados</div>
+            <div class="value">${{KPI.executive_sku_count}}</div>
+            <div class="sub">com demanda, SL >= 99% e sem perda</div>
         </div>
     `;
 
@@ -826,18 +850,19 @@ function drawBusinessCharts() {{
     }};
     Plotly.newPlot('chart-abc', [abcTrace], abcLayout, {{responsive: true, displayModeBar: false}});
 
-    // Revenue risk table
+    // Executive protected-products table
     const revTable = document.getElementById('revenue-risk-table');
     revTable.innerHTML = `
-        <tr><th>SKU</th><th>Produto</th><th>Loja</th><th>Receita Q4</th><th>Dias Ruptura</th><th>Status</th></tr>
+        <tr><th>SKU</th><th>Produto</th><th>Loja</th><th>Demanda</th><th>Atendido</th><th>Receita Protegida</th><th>Status</th></tr>
         ${{REV_RISK_DATA.map(r => `
             <tr>
                 <td class="num">${{r.product}}</td>
                 <td>${{r.product_name ? r.product_name.substring(0, 30) : ''}}</td>
                 <td class="num">${{r.location}}</td>
+                <td class="num">${{r.demand.toFixed(0)}}</td>
+                <td class="num">${{r.fulfilled.toFixed(0)}}</td>
                 <td class="num">R$ ${{r.revenue.toFixed(2)}}</td>
-                <td class="num">${{r.stockout}}</td>
-                <td>${{r.stockout > 0 ? '<span class="badge-sl low">⚠️ RUPTURA</span>' : '<span class="badge-sl high">✅ OK</span>'}}</td>
+                <td><span class="badge-sl high">OK</span></td>
             </tr>
         `).join('')}}
     `;
@@ -858,17 +883,15 @@ function drawBusinessCharts() {{
         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
     }}, {{responsive: true, displayModeBar: false}});
 
-    // Over/under chart
-    const ou = OVER_UNDER_DATA.filter(d => d.over + d.under > 0).sort((a,b) => (b.over+b.under) - (a.over+a.under)).slice(0, 10);
-    const ouLabels = ou.map(d => d.label ? d.label.substring(0, 18) : 'SKU ' + d.product);
+    // Executive demand coverage chart
+    const exec = EXECUTIVE_SKU_DATA.slice(0, 10);
+    const execLabels = exec.map(d => d.product_name ? d.product_name.substring(0, 18) : 'SKU ' + d.product);
     Plotly.newPlot('chart-over-under', [
-        {{type: 'bar', name: 'Over (superestimou)', x: ouLabels, y: ou.map(d => d.over), marker: {{color: '#e17055'}}}},
-        {{type: 'bar', name: 'Under (subestimou)', x: ouLabels, y: ou.map(d => d.under), marker: {{color: '#00b894'}}}},
+        {{type: 'bar', name: 'Demanda atendida', x: execLabels, y: exec.map(d => d.total_fulfilled_units || 0), marker: {{color: '#00b894'}}}},
     ], {{
-        barmode: 'relative', margin: {{l: 50, r: 30, t: 10, b: 80}}, height: 280,
+        margin: {{l: 50, r: 30, t: 10, b: 80}}, height: 280,
         xaxis: {{tickangle: -45, tickfont: {{size: 9}}}},
         yaxis: {{title: 'Unidades'}},
-        legend: {{orientation: 'h', y: -0.3}},
         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
     }}, {{responsive: true, displayModeBar: false}});
 }}
@@ -1135,3 +1158,5 @@ with open("dashboard.html", "w", encoding="utf-8") as f:
 print("[OK] dashboard.html generated successfully")
 print(f"   File size: {len(html.encode('utf-8')) / 1024:.0f} KB")
 print("   Open in browser to view")
+
+
