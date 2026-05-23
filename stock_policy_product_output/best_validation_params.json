@@ -1,0 +1,18 @@
+{
+  "z_value": 0.84,
+  "review_days": 7,
+  "objective": 177.0631,
+  "service_level": 0.985945,
+  "actual_service_level": 0.990817,
+  "service_level_delta_vs_actual": -0.004873,
+  "avg_inventory_value": 132.6094,
+  "actual_avg_inventory_value": 130.2197,
+  "inventory_value_delta_vs_actual": 2.3896,
+  "total_ordering_cost": 4089.74,
+  "total_lost_sales_units": 9.0,
+  "total_orders": 178,
+  "total_forecast_units": 2514.7206,
+  "total_actual_units": 1591.0,
+  "horizon_days": 92,
+  "series_days": 5336
+}

@@ -1,0 +1,7 @@
+metric,value
+service_level,0.995315
+actual_service_level,0.991379
+avg_inventory_value,171.4188
+actual_avg_inventory_value,163.2746
+total_ordering_cost,2630.01
+total_lost_sales_units,3.0

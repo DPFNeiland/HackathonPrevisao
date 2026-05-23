@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Stock Policy Product</title>
+  <style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f5f7fb;
+  color: #132238;
+  margin: 0;
+  padding: 0;
+}
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 28px 48px;
+}
+.hero {
+  background: linear-gradient(135deg, #0b2545, #1f4d78);
+  color: white;
+  padding: 28px;
+  border-radius: 18px;
+  margin-bottom: 24px;
+}
+.hero h1, .hero h2 {
+  margin: 0 0 10px;
+}
+.hero p {
+  margin: 0;
+  color: #d9e4f2;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin: 20px 0 26px;
+}
+.card {
+  background: white;
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  box-shadow: 0 8px 24px rgba(15, 30, 54, 0.08);
+}
+.card-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #5f7187;
+  margin-bottom: 8px;
+}
+.card-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0b2545;
+}
+.section {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(15, 30, 54, 0.08);
+  margin-bottom: 20px;
+}
+.section h3 {
+  margin-top: 0;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th, td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e4eaf1;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #edf3f8;
+  color: #17324f;
+}
+tr:nth-child(even) td {
+  background: #fafcfe;
+}
+.pill {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf3f8;
+  color: #17324f;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pill-a { background: #d9ecff; color: #0b4b94; }
+.pill-b { background: #fef3d2; color: #8a5b00; }
+.pill-c { background: #eceff3; color: #4c5b6b; }
+a {
+  color: #0b4b94;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.note {
+  color: #5f7187;
+  font-size: 13px;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+.metric-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.metric-item {
+  background: #f7f9fc;
+  border-radius: 14px;
+  padding: 12px;
+}
+.metric-item strong {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #5f7187;
+  margin-bottom: 6px;
+}
+.metric-item span {
+  font-size: 18px;
+  font-weight: 700;
+}
+.chart-wrap {
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 10px;
+}
+.back-link {
+  margin-bottom: 14px;
+  display: inline-block;
+}
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>Stock Policy Product</h1>
+      <p>Pipeline escalavel para forecast, politica de estoque, backtest e analise por SKU x loja.</p>
+      <p class="note">Horizonte: test_q4_2024 | Forecast mode: static policy + rolling report | z escolhido: 0.84 | review_days: 7</p>
+    </div>
+
+    <div class="card-grid"><div class="card"><div class="card-label">Servico simulado</div><div class="card-value">99.53%</div></div><div class="card"><div class="card-label">Servico real</div><div class="card-value">99.14%</div></div><div class="card"><div class="card-label">Capital medio simulado</div><div class="card-value">R$ 171,42</div></div><div class="card"><div class="card-label">Capital medio real</div><div class="card-value">R$ 163,27</div></div><div class="card"><div class="card-label">Pedidos emitidos</div><div class="card-value">113</div></div><div class="card"><div class="card-label">Custo total de pedido</div><div class="card-value">R$ 2.630,01</div></div></div>
+
+    <div class="section">
+      <h3>Como usar este produto</h3>
+      <p>Comece pela tabela de SKU x loja abaixo. Cada linha abre uma pagina propria com forecast, simulacao de estoque, pedidos emitidos e leitura rapida de risco.</p>
+    </div>
+
+    <div class="section">
+      <h3>Busca de parametros globais</h3>
+      <p class="note">A grade abaixo mostra as 10 melhores combinacoes de z e review_days na janela de validacao. O objetivo penaliza servico abaixo da meta e depois busca menos capital e menor custo de pedido.</p>
+      <table><thead><tr><th>z</th><th>review_days</th><th>Servico</th><th>Capital medio</th><th>Custo total</th><th>Objetivo</th></tr></thead><tbody><tr><td>0,84</td><td>7</td><td>98.59%</td><td>R$ 132,61</td><td>R$ 4.089,74</td><td>177,06</td></tr><tr><td>0,84</td><td>5</td><td>98.28%</td><td>R$ 127,25</td><td>R$ 4.793,03</td><td>179,35</td></tr><tr><td>0,84</td><td>10</td><td>98.71%</td><td>R$ 141,79</td><td>R$ 3.565,38</td><td>180,55</td></tr><tr><td>1,04</td><td>7</td><td>99.06%</td><td>R$ 137,35</td><td>R$ 4.106,49</td><td>181,98</td></tr><tr><td>0,84</td><td>3</td><td>98.16%</td><td>R$ 122,66</td><td>R$ 5.590,70</td><td>183,43</td></tr><tr><td>1,04</td><td>5</td><td>99.12%</td><td>R$ 131,88</td><td>R$ 4.813,75</td><td>184,21</td></tr><tr><td>1,04</td><td>10</td><td>99.33%</td><td>R$ 146,51</td><td>R$ 3.582,13</td><td>185,45</td></tr><tr><td>0,84</td><td>14</td><td>99.03%</td><td>R$ 153,52</td><td>R$ 3.012,52</td><td>186,26</td></tr><tr><td>1,04</td><td>3</td><td>99.03%</td><td>R$ 127,36</td><td>R$ 5.643,44</td><td>188,70</td></tr><tr><td>1,28</td><td>7</td><td>99.53%</td><td>R$ 143,55</td><td>R$ 4.176,28</td><td>188,94</td></tr></tbody></table>
+    </div>
+
+    <div class="section">
+      <h3>Carteira por SKU x loja</h3>
+      <table><thead><tr><th>Produto</th><th>ABC</th><th>Servico simulado</th><th>Servico real</th><th>Capital medio</th><th>Demanda Q4</th><th>Perda simulada</th><th>s</th><th>S</th></tr></thead><tbody><tr><td><a href="products/product_1314_18064.html">NEOSORO SOLUCAO NASAL ADULTO 30ML</a><div class="note">SKU 18064 | Loja 1314</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 1.495,29</td><td>854,00</td><td>0,00</td><td>180</td><td>339</td></tr><tr><td><a href="products/product_841_18064.html">NEOSORO SOLUCAO NASAL ADULTO 30ML</a><div class="note">SKU 18064 | Loja 841</div></td><td><span class="pill pill-a">A</span></td><td>98.91%</td><td>100.00%</td><td>R$ 169,52</td><td>103,00</td><td>1,00</td><td>11</td><td>33</td></tr><tr><td><a href="products/product_1314_9607.html">NARIDRIN 12H ADULTO 30ML</a><div class="note">SKU 9607 | Loja 1314</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 222,56</td><td>48,00</td><td>0,00</td><td>10</td><td>15</td></tr><tr><td><a href="products/product_1314_21141.html">PERCOF XAROPE 120ML</a><div class="note">SKU 21141 | Loja 1314</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 192,46</td><td>34,00</td><td>0,00</td><td>6</td><td>12</td></tr><tr><td><a href="products/product_1314_20635.html">ABRILAR XAROPE 100ML</a><div class="note">SKU 20635 | Loja 1314</div></td><td><span class="pill pill-a">A</span></td><td>97.83%</td><td>100.00%</td><td>R$ 158,25</td><td>28,00</td><td>1,00</td><td>5</td><td>9</td></tr><tr><td><a href="products/product_1314_15589.html">ANTUX XAROPE 120ML</a><div class="note">SKU 15589 | Loja 1314</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 287,23</td><td>16,00</td><td>0,00</td><td>6</td><td>12</td></tr><tr><td><a href="products/product_841_9607.html">NARIDRIN 12H ADULTO 30ML</a><div class="note">SKU 9607 | Loja 841</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 167,41</td><td>11,00</td><td>0,00</td><td>3</td><td>9</td></tr><tr><td><a href="products/product_841_21141.html">PERCOF XAROPE 120ML</a><div class="note">SKU 21141 | Loja 841</div></td><td><span class="pill pill-a">A</span></td><td>100.00%</td><td>100.00%</td><td>R$ 124,77</td><td>10,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_5345.html">NARIDRIN ADULTO 15ML</a><div class="note">SKU 5345 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 176,42</td><td>11,00</td><td>0,00</td><td>5</td><td>15</td></tr><tr><td><a href="products/product_1314_1439.html">SORINE GTS ADULTO 30ML</a><div class="note">SKU 1439 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 135,28</td><td>8,00</td><td>0,00</td><td>6</td><td>9</td></tr><tr><td><a href="products/product_841_15589.html">ANTUX XAROPE 120ML</a><div class="note">SKU 15589 | Loja 841</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 179,24</td><td>7,00</td><td>0,00</td><td>3</td><td>6</td></tr><tr><td><a href="products/product_1314_48813.html">ARLIVRY XAROPE MEL 100ML</a><div class="note">SKU 48813 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 85,82</td><td>7,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_31330.html">ABRILAR XAROPE 200ML</a><div class="note">SKU 31330 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 485,61</td><td>5,00</td><td>0,00</td><td>6</td><td>7</td></tr><tr><td><a href="products/product_1314_48812.html">ARLIVRY XAROPE CEREJA 100ML</a><div class="note">SKU 48812 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 142,11</td><td>4,00</td><td>0,00</td><td>6</td><td>7</td></tr><tr><td><a href="products/product_1314_44217.html">BROMELIN S 100ML</a><div class="note">SKU 44217 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 211,56</td><td>1,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_57816.html">OSELTAMIVIR 30MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57816 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>98.91%</td><td>R$ 271,46</td><td>0,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_841_57817.html">OSELTAMIVIR 45MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57817 | Loja 841</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 316,19</td><td>1,00</td><td>0,00</td><td>2</td><td>3</td></tr><tr><td><a href="products/product_1314_57814.html">OSELTAMIVIR 75MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57814 | Loja 1314</div></td><td><span class="pill pill-b">B</span></td><td>100.00%</td><td>100.00%</td><td>R$ 344,11</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_36857.html">NARIX ADULTO 30ML</a><div class="note">SKU 36857 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 55,29</td><td>17,00</td><td>0,00</td><td>7</td><td>12</td></tr><tr><td><a href="products/product_1314_35772.html">EMSEXPECTOR XAROPE 120ML</a><div class="note">SKU 35772 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 100,48</td><td>6,00</td><td>0,00</td><td>4</td><td>5</td></tr><tr><td><a href="products/product_841_36857.html">NARIX ADULTO 30ML</a><div class="note">SKU 36857 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>95.65%</td><td>R$ 28,19</td><td>6,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_35416.html">EXPECTAMIN XAROPE 120ML</a><div class="note">SKU 35416 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 117,60</td><td>3,00</td><td>0,00</td><td>3</td><td>9</td></tr><tr><td><a href="products/product_841_5345.html">NARIDRIN ADULTO 15ML</a><div class="note">SKU 5345 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 67,82</td><td>7,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_13315.html">BROMELIN SUSP 100ML</a><div class="note">SKU 13315 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>89.13%</td><td>100.00%</td><td>R$ 102,18</td><td>6,00</td><td>0,00</td><td>1</td><td>3</td></tr><tr><td><a href="products/product_841_48813.html">ARLIVRY XAROPE MEL 100ML</a><div class="note">SKU 48813 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 52,63</td><td>2,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_20635.html">ABRILAR XAROPE 100ML</a><div class="note">SKU 20635 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>97.83%</td><td>R$ 68,53</td><td>2,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_57814.html">OSELTAMIVIR 75MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57814 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>93.48%</td><td>97.83%</td><td>R$ 383,95</td><td>9,00</td><td>1,00</td><td>1</td><td>3</td></tr><tr><td><a href="products/product_841_1439.html">SORINE GTS ADULTO 30ML</a><div class="note">SKU 1439 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>95.65%</td><td>95.65%</td><td>R$ 38,96</td><td>3,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_57816.html">OSELTAMIVIR 30MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57816 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>94.57%</td><td>R$ 200,60</td><td>5,00</td><td>0,00</td><td>2</td><td>3</td></tr><tr><td><a href="products/product_841_35772.html">EMSEXPECTOR XAROPE 120ML</a><div class="note">SKU 35772 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>97.83%</td><td>94.57%</td><td>R$ 45,47</td><td>2,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_35416.html">EXPECTAMIN XAROPE 120ML</a><div class="note">SKU 35416 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>94.57%</td><td>R$ 95,71</td><td>1,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_51957.html">HEDERA CIMED 7MG 100ML</a><div class="note">SKU 51957 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>95.65%</td><td>R$ 138,65</td><td>1,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_15590.html">ANTUX GTS 20ML</a><div class="note">SKU 15590 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 179,10</td><td>0,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_841_15590.html">ANTUX GTS 20ML</a><div class="note">SKU 15590 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 90,59</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_48812.html">ARLIVRY XAROPE CEREJA 100ML</a><div class="note">SKU 48812 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>97.83%</td><td>R$ 42,85</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_42076.html">HEDRA EXPEC XAROPE 100ML</a><div class="note">SKU 42076 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 72,02</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_58701.html">ABRILAR XAROPE L-MENTOL 200ML</a><div class="note">SKU 58701 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 157,17</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_76834.html">SORINAN ADULTO 0,5MG SOL NASAL 30ML</a><div class="note">SKU 76834 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 16,17</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_51957.html">HEDERA CIMED 7MG 100ML</a><div class="note">SKU 51957 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 146,56</td><td>0,00</td><td>0,00</td><td>3</td><td>4</td></tr><tr><td><a href="products/product_1314_58701.html">ABRILAR XAROPE L-MENTOL 200ML</a><div class="note">SKU 58701 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 123,75</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_62782.html">HEDERA CIMED 7MG/ML CEREJA XPE100ML</a><div class="note">SKU 62782 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>92.39%</td><td>R$ 75,41</td><td>1,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_15496.html">TAMIFLU 75MG CAPS C/10</a><div class="note">SKU 15496 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 541,22</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_42076.html">HEDRA EXPEC XAROPE 100ML</a><div class="note">SKU 42076 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 42,34</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_54554.html">ALOFF XPE 60ML</a><div class="note">SKU 54554 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 66,08</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_55917.html">POLARATUSS LIQ 120ML</a><div class="note">SKU 55917 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 59,06</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_57817.html">OSELTAMIVIR 45MG CAPS/10 GN-NATCOF</a><div class="note">SKU 57817 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 211,06</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_57912.html">LORATAMED D XPE 60ML</a><div class="note">SKU 57912 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 47,74</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_62364.html">ALOFF XPE 60ML + SER</a><div class="note">SKU 62364 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 72,90</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_1314_62782.html">HEDERA CIMED 7MG/ML CEREJA XPE100ML</a><div class="note">SKU 62782 | Loja 1314</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 74,52</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_13315.html">BROMELIN SUSP 100ML</a><div class="note">SKU 13315 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 111,78</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_15496.html">TAMIFLU 75MG CAPS C/10</a><div class="note">SKU 15496 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 554,60</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_31330.html">ABRILAR XAROPE 200ML</a><div class="note">SKU 31330 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 157,10</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_44217.html">BROMELIN S 100ML</a><div class="note">SKU 44217 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 114,72</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_54554.html">ALOFF XPE 60ML</a><div class="note">SKU 54554 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 66,08</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_55917.html">POLARATUSS LIQ 120ML</a><div class="note">SKU 55917 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 91,14</td><td>0,00</td><td>0,00</td><td>2</td><td>3</td></tr><tr><td><a href="products/product_841_57912.html">LORATAMED D XPE 60ML</a><div class="note">SKU 57912 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>94.57%</td><td>R$ 73,62</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_62364.html">ALOFF XPE 60ML + SER</a><div class="note">SKU 62364 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 74,98</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr><tr><td><a href="products/product_841_76834.html">SORINAN ADULTO 0,5MG SOL NASAL 30ML</a><div class="note">SKU 76834 | Loja 841</div></td><td><span class="pill pill-c">C</span></td><td>100.00%</td><td>100.00%</td><td>R$ 18,38</td><td>0,00</td><td>0,00</td><td>1</td><td>2</td></tr></tbody></table>
+    </div>
+  </div>
+</body>
+</html>
