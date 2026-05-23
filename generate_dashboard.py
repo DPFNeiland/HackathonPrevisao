@@ -13,43 +13,40 @@ POLICY_CSV = OUTPUT_DIR / "policy.csv"
 
 OUT_HTML = OUTPUT_DIR / "dashboard.html"
 
-def load_data():
-    sim = pd.read_csv(SIM_CSV, parse_dates=["date"])
-    sku = pd.read_csv(SKU_CSV)
-    metrics = json.loads(METRICS_JSON.read_text())
-    meta = json.loads(META_JSON.read_text())
-    if TUNE_CSV.exists():
-        tune = pd.read_csv(TUNE_CSV)
-    else:
-        tune = pd.DataFrame()
-    return sim, sku, metrics, meta, tune
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            if np.isnan(obj):
+                return None
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        return super().default(obj)
 
-def fmt(v, d=2):
-    if isinstance(v, float):
-        return round(v, d)
-    return v
+def to_json(obj):
+    return json.dumps(obj, cls=NpEncoder, ensure_ascii=False)
 
-def perc(v):
-    return f"{(v*100):.2f}%"
-
-def brl(v):
-    return f"R$ {v:,.2f}"
-
-def delta_class(v):
-    if v > 0.01:
-        return "neg"
-    elif v < -0.01:
-        return "pos"
-    return "neutral"
+def clean_nan(obj):
+    if isinstance(obj, dict):
+        return {k: clean_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_nan(v) for v in obj]
+    if isinstance(obj, float) and np.isnan(obj):
+        return None
+    return obj
 
 def build_hero_data(sim):
-    hero1 = sim[sim["product"] == 18064].to_dict("records")
-    hero2 = sim[sim["product"] == 9607].to_dict("records")
-    return json.dumps(hero1, default=str), json.dumps(hero2, default=str)
+    hero1 = clean_nan(sim[sim["product"] == 18064].to_dict("records"))
+    hero2 = clean_nan(sim[sim["product"] == 9607].to_dict("records"))
+    return to_json(hero1), to_json(hero2)
 
 def build_sku_data(sku):
-    records = sku.to_dict("records")
-    return json.dumps(records, default=str)
+    records = clean_nan(sku.to_dict("records"))
+    return to_json(records)
 
 def build_abc_data(sku):
     abc = sku.groupby("product", as_index=False).agg(
@@ -60,7 +57,7 @@ def build_abc_data(sku):
     total = abc["demand"].sum()
     abc["cum_demand"] = abc["demand"].cumsum() / total
     abc["label"] = abc["product_name"].str[:40]
-    return json.dumps(abc.to_dict("records"), default=str)
+    return to_json(clean_nan(abc.to_dict("records")))
 
 def build_loja_data(sku):
     loja = sku.groupby("location", as_index=False).agg(
@@ -72,16 +69,17 @@ def build_loja_data(sku):
         stockout_days=("stockout_days", "sum"),
         lost_units=("total_lost_sales_units", "sum"),
     )
-    return json.dumps(loja.to_dict("records"), default=str)
+    return to_json(clean_nan(loja.to_dict("records")))
 
 def build_weekly_data(sim):
+    sim = sim.copy()
     sim["week"] = sim["date"].dt.isocalendar().week.astype(int)
     weekly = sim.groupby("week", as_index=False).agg(
         demand=("actual_demand", "sum"),
         forecast=("forecast_demand", "sum"),
         lost=("lost_sales_units", "sum"),
     ).sort_values("week")
-    return json.dumps(weekly.to_dict("records"), default=str)
+    return to_json(clean_nan(weekly.to_dict("records")))
 
 def build_promo_data(sim):
     promo = sim.groupby("is_promo", as_index=False).agg(
@@ -90,26 +88,36 @@ def build_promo_data(sim):
         days=("date", "nunique"),
         lost=("lost_sales_units", "sum"),
     )
-    return json.dumps(promo.to_dict("records"), default=str)
+    return to_json(clean_nan(promo.to_dict("records")))
 
 def build_tune_data(tune):
     if tune.empty:
         return "[]"
-    top = tune.nsmallest(20, "objective").to_dict("records")
-    return json.dumps(top, default=str)
+    top = tune.nsmallest(20, "objective")
+    return to_json(clean_nan(top.to_dict("records")))
 
 def build_rev_risk_data(sku):
     sku = sku.copy()
     sku["revenue"] = sku["total_actual_demand"] * sku["sales_price"].fillna(0)
     risk = sku.nlargest(10, "revenue")[
         ["product", "location", "revenue", "stockout_days", "product_name"]
-    ].to_dict("records")
-    return json.dumps(risk, default=str)
+    ]
+    return to_json(clean_nan(risk.to_dict("records")))
 
 def build_daily_timeline(sim):
     sim = sim.sort_values("date")
-    records = sim.to_dict("records")
-    return json.dumps(records, default=str)
+    return to_json(clean_nan(sim.to_dict("records")))
+
+def load_data():
+    sim = pd.read_csv(SIM_CSV, parse_dates=["date"])
+    sku = pd.read_csv(SKU_CSV)
+    metrics = json.loads(METRICS_JSON.read_text())
+    meta = json.loads(META_JSON.read_text())
+    if TUNE_CSV.exists():
+        tune = pd.read_csv(TUNE_CSV)
+    else:
+        tune = pd.DataFrame()
+    return sim, sku, metrics, meta, tune
 
 def generate_dashboard():
     sim, sku, metrics, meta, tune = load_data()
@@ -364,7 +372,7 @@ const TUNE_DATA = {tune_json};
 const REV_RISK_DATA = {rev_json};
 const CONFIG = {{
     abc_classification: "{abc_mode}",
-    z_by_class: {json.dumps(z_by_class)},
+                z_by_class: """ + to_json(z_by_class) + """,
     z_uniform: {z_uniform},
     review_days: {review},
     reorder_quantile: {meta.get('empirical_floor_reorder_quantile',0.75)},
@@ -701,11 +709,12 @@ drawOverview();
     OUT_HTML.write_text(html, encoding="utf-8")
     print(f"Dashboard generated: {OUT_HTML}")
     print(f"  Total SKU-location pairs: {len(sku)}")
-    print(f"  SL: {perc(sl)}")
-    print(f"  Avg inventory: {brl(avg_inv)}")
+    print(f"  SL: {sl*100:.2f}%")
+    print(f"  Avg inventory: R$ {avg_inv:.2f}")
     print(f"  Forecast: {fc_units:.0f} un")
     print(f"  Actual demand: {act_units:.0f} un")
     print(f"  Lost sales: {lost_u} un")
+    print(f"  File size: {OUT_HTML.stat().st_size / 1024:.0f} KB")
 
 if __name__ == "__main__":
     generate_dashboard()
