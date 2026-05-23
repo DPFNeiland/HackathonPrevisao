@@ -1,0 +1,4 @@
+location;name;region;city;state;location_type;leadtime_dc_store;dc_suplier;frequency
+841;LOJA 841;Centro Oeste;CERES;GO;Store;3.0;CD 2 - GO;3.0
+1314;LOJA 1314;Centro Oeste;CORUMBA;MS;Store;9.0;CD 2 - GO;3.0
+2;CD 2 GO;Centro Oeste;HIDROLANDIA;GO;DC;;;
