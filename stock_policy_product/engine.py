@@ -190,6 +190,15 @@ def add_censored_demand_adjustment(panel: pd.DataFrame, train_end: pd.Timestamp)
     baseline = panel["dow_baseline"]
     baseline = baseline.fillna(panel["sku_baseline"])
     baseline = baseline.fillna(panel["store_weekday_baseline"])
+
+    # Global fallback: if all baselines are NaN (e.g. 100% stockout in training),
+    # use the overall median demand from the entire train set
+    if baseline.isna().all():
+        global_baseline = train["demand"].median()
+        if pd.isna(global_baseline) or global_baseline <= 0:
+            global_baseline = train["demand"].mean()
+        baseline = baseline.fillna(global_baseline)
+
     baseline = baseline.fillna(0.0)
 
     panel["corrected_demand"] = panel["demand"]
@@ -233,22 +242,27 @@ def compute_promo_uplift(panel: pd.DataFrame, train_end: pd.Timestamp) -> pd.Dat
     store_pivot = store_pivot.reset_index()
 
     uplift = panel[["location", "product"]].drop_duplicates()
-    uplift = uplift.merge(sku_pivot, on=["location", "product"], how="left")
-    uplift = uplift.merge(store_pivot, on="location", how="left")
-
-    sku_ratio = uplift["mean_demand_1"] / uplift["mean_demand_0"]
-    sku_valid = (uplift["days_1"] >= 3) & (uplift["days_0"] >= 20) & np.isfinite(sku_ratio)
-
-    store_ratio = uplift["store_mean_demand_1"] / uplift["store_mean_demand_0"]
-    store_valid = (
-        (uplift["store_days_1"] >= 10)
-        & (uplift["store_days_0"] >= 40)
-        & np.isfinite(store_ratio)
-    )
+    if not sku_pivot.empty:
+        uplift = uplift.merge(sku_pivot, on=["location", "product"], how="left")
+    if not store_pivot.empty:
+        uplift = uplift.merge(store_pivot, on="location", how="left")
 
     uplift["promo_uplift"] = 1.0
-    uplift.loc[sku_valid, "promo_uplift"] = sku_ratio[sku_valid]
-    uplift.loc[~sku_valid & store_valid, "promo_uplift"] = store_ratio[~sku_valid & store_valid]
+
+    if "mean_demand_1" in uplift.columns and "mean_demand_0" in uplift.columns:
+        sku_ratio = uplift["mean_demand_1"] / uplift["mean_demand_0"]
+        sku_valid = (uplift.get("days_1", pd.Series(0)) >= 3) & (uplift.get("days_0", pd.Series(0)) >= 20) & np.isfinite(sku_ratio)
+        uplift.loc[sku_valid, "promo_uplift"] = sku_ratio[sku_valid]
+
+    if "store_mean_demand_1" in uplift.columns and "store_mean_demand_0" in uplift.columns:
+        store_ratio = uplift["store_mean_demand_1"] / uplift["store_mean_demand_0"]
+        store_valid = (
+            (uplift.get("store_days_1", pd.Series(0)) >= 10)
+            & (uplift.get("store_days_0", pd.Series(0)) >= 40)
+            & np.isfinite(store_ratio)
+        )
+        uplift.loc[(uplift["promo_uplift"] == 1.0) & store_valid, "promo_uplift"] = store_ratio[store_valid]
+
     uplift["promo_uplift"] = uplift["promo_uplift"].clip(lower=1.0, upper=2.5).fillna(1.0)
     return uplift[["location", "product", "promo_uplift"]]
 
@@ -401,7 +415,7 @@ def build_summary_from_forecast(forecast: pd.DataFrame) -> pd.DataFrame:
 
 
 def round_up_to_batch(quantity: float, batch_size: float) -> int:
-    if quantity <= 0:
+    if quantity <= 0 or not np.isfinite(quantity):
         return 0
     if pd.isna(batch_size) or batch_size <= 1:
         return int(np.ceil(quantity))
@@ -581,6 +595,8 @@ def get_initial_balances(panel: pd.DataFrame, simulation_start: pd.Timestamp) ->
         .groupby(["location", "product"], as_index=False)
         .tail(1)
     )
+    # Remove rows where balance is NaN — they indicate missing snapshots
+    prior = prior.dropna(subset=["balance"])
     initial = prior[["location", "product", "balance"]].rename(columns={"balance": "initial_balance"})
 
     missing_pairs = panel[["location", "product"]].drop_duplicates().merge(
@@ -613,6 +629,19 @@ def simulate_policy(
     *,
     warmup_days: int = 45,
 ) -> pd.DataFrame:
+    required_forecast_cols = {"date", "location", "product", "forecast_demand", "forecast_std", "promo_uplift"}
+    missing_forecast = required_forecast_cols - set(forecast.columns)
+    if missing_forecast:
+        raise ValueError(f"forecast missing required columns: {missing_forecast}")
+
+    required_policy_cols = {
+        "location", "product", "reorder_point_s", "order_up_to_S",
+        "lead_time_days", "purchase_price", "cost_of_ordering", "minimum_delivery_batch",
+    }
+    missing_policy = required_policy_cols - set(policy.columns)
+    if missing_policy:
+        raise ValueError(f"policy missing required columns: {missing_policy}")
+
     simulation_start = horizon.start - pd.Timedelta(days=warmup_days)
     simulation_panel = panel[
         (panel["date"] >= simulation_start) & (panel["date"] <= horizon.end)
@@ -693,10 +722,11 @@ def simulate_policy(
             on_order_after = sum(qty for _, qty in pending_orders)
             inventory_position_after_order = opening_inventory + on_order_after
 
-            demand = float(row.demand or 0.0)
+            demand = float(row.corrected_demand or 0.0)
             fulfilled_units = min(opening_inventory, demand)
             lost_sales_units = max(demand - opening_inventory, 0.0)
             ending_inventory = opening_inventory - fulfilled_units
+            is_stockout = lost_sales_units > 0
 
             purchase_price = float(row.purchase_price or 0.0)
             simulated_inventory_value = ending_inventory * purchase_price
@@ -736,7 +766,7 @@ def simulate_policy(
                     "fulfilled_units": round(fulfilled_units, 4),
                     "lost_sales_units": round(lost_sales_units, 4),
                     "ending_inventory": round(ending_inventory, 4),
-                    "simulated_stockout_flag": int(ending_inventory <= 0),
+                    "simulated_stockout_flag": int(is_stockout),
                     "purchase_price": purchase_price,
                     "sales_price": float(row.sales_price or 0.0),
                     "simulated_inventory_value": round(simulated_inventory_value, 4),
@@ -917,7 +947,7 @@ def tune_local_sku_overrides(
     panel: pd.DataFrame,
     horizon: Horizon,
     static_summary: pd.DataFrame,
-    rolling_forecast: pd.DataFrame,
+    validation_forecast: pd.DataFrame,
     *,
     global_z_value: float,
     global_review_days: int,
@@ -938,9 +968,9 @@ def tune_local_sku_overrides(
         item_panel = panel[
             (panel["location"] == summary_row.location) & (panel["product"] == summary_row.product)
         ].copy()
-        item_forecast = rolling_forecast[
-            (rolling_forecast["location"] == summary_row.location)
-            & (rolling_forecast["product"] == summary_row.product)
+        item_forecast = validation_forecast[
+            (validation_forecast["location"] == summary_row.location)
+            & (validation_forecast["product"] == summary_row.product)
         ].copy()
 
         best_metrics: dict[str, float] | None = None

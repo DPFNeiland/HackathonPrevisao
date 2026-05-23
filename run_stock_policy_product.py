@@ -64,8 +64,8 @@ def main() -> None:
     parser.add_argument(
         "--forecast-mode-validation",
         choices=["static", "rolling"],
-        default="rolling",
-        help="Forecast mode used while tuning global z and review_days.",
+        default="static",
+        help="Forecast mode used while tuning global z and review_days (recommended: static to avoid temporal leakage).",
     )
     args = parser.parse_args()
 
@@ -113,7 +113,7 @@ def main() -> None:
         panel=validation_panel,
         horizon=validation_horizon,
         static_summary=validation_summary,
-        rolling_forecast=validation_forecast_rolling,
+        validation_forecast=validation_forecast_static,
         global_z_value=float(best_params["z_value"]),
         global_review_days=int(best_params["review_days"]),
         service_level_target=0.97,
@@ -152,7 +152,7 @@ def main() -> None:
 
     simulation = simulate_policy(
         panel=final_panel,
-        forecast=final_forecast_rolling,
+        forecast=final_forecast_static,
         policy=final_policy,
         horizon=final_horizon,
         warmup_days=45,
@@ -176,7 +176,7 @@ def main() -> None:
         "output_dir": str(output_dir),
         "horizon": final_horizon.name,
         "validation_horizon": validation_horizon.name,
-        "forecast_mode": "static_for_policy_and_rolling_for_reporting",
+        "forecast_mode": "static_forecast_all_phases",
         "validation_forecast_mode": args.forecast_mode_validation,
         "service_level_target": args.service_level_target,
         "local_service_level_target": 0.97,
@@ -200,7 +200,7 @@ def main() -> None:
         simulation=simulation,
         run_metadata={
             "horizon": final_horizon.name,
-            "forecast_mode": "static policy + rolling report",
+            "forecast_mode": "static_all_phases",
             "z_value": f"{float(best_params['z_value']):.2f}",
             "review_days": str(int(best_params["review_days"])),
         },
