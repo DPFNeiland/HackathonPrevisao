@@ -278,7 +278,7 @@ def forecast_group(group: pd.DataFrame, mode: str) -> pd.DataFrame:
                     ),
                 ]
             )
-            demand_std = float(overall_recent["corrected_demand"].std(ddof=0))
+            demand_std = float(overall_recent["corrected_demand"].std(ddof=1))
             if np.isnan(demand_std):
                 demand_std = 0.0
 

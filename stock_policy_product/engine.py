@@ -281,6 +281,8 @@ def weighted_component_mean(components: list[tuple[float, float]]) -> float:
     if not usable:
         return 0.0
     total_weight = sum(weight for weight, _ in usable)
+    if total_weight == 0.0:
+        return 0.0
     return float(sum(weight * value for weight, value in usable) / total_weight)
 
 
@@ -323,7 +325,7 @@ def forecast_group(group: pd.DataFrame, horizon: Horizon, mode: str) -> pd.DataF
                     ),
                 ]
             )
-            demand_std = float(overall_recent["corrected_demand"].std(ddof=0))
+            demand_std = float(overall_recent["corrected_demand"].std(ddof=1))
             if np.isnan(demand_std):
                 demand_std = 0.0
 
@@ -385,6 +387,10 @@ def assign_abc_class(summary: pd.DataFrame) -> pd.DataFrame:
         "A",
         np.where(summary["cumulative_share"] <= 0.95, "B", "C"),
     )
+    # Garantia: o SKU de maior valor (primeiro na ordem decrescente) e sempre A
+    # Isso cobre o caso de unico SKU com cumulative_share=1.0 (>0.95)
+    if len(summary) > 0:
+        summary.loc[summary.index[0], "abc_class"] = "A"
     return summary.drop(columns=["cumulative_share"])
 
 
@@ -706,7 +712,11 @@ def simulate_policy(
             reorder_point = int(row.reorder_point_s or 0)
             order_up_to = int(row.order_up_to_S or 0)
             batch_size = int(row.minimum_delivery_batch or 1)
-            lead_time_days = int(row.lead_time_days or 0)
+            pref_lt = getattr(row, "lead_time_days_policy", None)
+            if pref_lt is not None and not (isinstance(pref_lt, float) and np.isnan(pref_lt)):
+                lead_time_days = int(pref_lt or 0)
+            else:
+                lead_time_days = int(row.lead_time_days or 0)
 
             order_qty = 0
             arrival_date = pd.NaT
@@ -715,9 +725,15 @@ def simulate_policy(
                 raw_qty = order_up_to - inventory_position_before_order
                 order_qty = round_up_to_batch(raw_qty, batch_size)
                 if order_qty > 0:
-                    arrival_date = row.date + pd.Timedelta(days=lead_time_days)
-                    pending_orders.append((arrival_date, order_qty))
                     ordering_cost = float(row.cost_of_ordering or 0.0)
+                    if lead_time_days == 0:
+                        # LT=0: entrega imediata, disponivel para venda no mesmo dia
+                        received_qty += order_qty
+                        opening_inventory += order_qty
+                        arrival_date = row.date
+                    else:
+                        arrival_date = row.date + pd.Timedelta(days=lead_time_days)
+                        pending_orders.append((arrival_date, order_qty))
 
             on_order_after = sum(qty for _, qty in pending_orders)
             inventory_position_after_order = opening_inventory + on_order_after
