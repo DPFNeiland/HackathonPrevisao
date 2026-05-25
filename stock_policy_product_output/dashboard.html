@@ -202,37 +202,37 @@ const REV_RISK_DATA = [{"product": 18064, "location": 1314, "revenue": 6712.4400
 const CONFIG = {
     abc_classification: "demand_volume_70_88",
                 z_by_class: {"A": 1.28, "B": 0.84, "C": 0.0},
-    z_uniform: {z_uniform},
-    review_days: {review},
-    reorder_quantile: {meta.get('empirical_floor_reorder_quantile',0.75)},
-    order_up_to_quantile: {meta.get('empirical_floor_order_up_to_quantile',0.90)},
+    z_uniform: 0.84,
+    review_days: 7,
+    reorder_quantile: 0.50,
+    order_up_to_quantile: 0.75,
     forecast_mode: "static + promo median/sqrt + zero-forecast <=3un",
     promo_cap: 2.0,
-}};
+};
 
 // ============ PAGE SWITCHING ============
-function switchPage(page) {{
+function switchPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
     document.getElementById('page-'+page).classList.add('active');
     var btns = document.querySelectorAll('.nav button');
-    for (var i=0; i<btns.length; i++) {{
-        if (btns[i].getAttribute('onclick') && btns[i].getAttribute('onclick').indexOf(page)>=0) {{
+    for (var i=0; i<btns.length; i++) {
+        if (btns[i].getAttribute('onclick') && btns[i].getAttribute('onclick').indexOf(page)>=0) {
             btns[i].classList.add('active');
-        }}
-    }}
-    setTimeout(function() {{
+        }
+    }
+    setTimeout(function() {
         if (page === 'overview') drawOverview();
         if (page === 'abc') drawABC();
         if (page === 'lojas') drawLojas();
         if (page === 'skus') drawSKUs();
         if (page === 'sim') drawSimulation();
         if (page === 'config') drawConfig();
-    }}, 100);
-}}
+    }, 100);
+}
 
 // ============ OVERVIEW ============
-function drawOverview() {{
+function drawOverview() {
     var m = METRICS;
     var slPct = (m.service_level*100).toFixed(2);
     var delta = m.avg_inventory_value - m.actual_avg_inventory_value;
@@ -242,30 +242,30 @@ function drawOverview() {{
     kpi.innerHTML = `
         <div class="kpi-card green" style="grid-column:span 1;">
             <div class="label">Nivel de Servico</div>
-            <div class="value">${{slPct}}%</div>
+            <div class="value">${slPct}%</div>
             <div class="sub">Meta: >= 92% <span style="color:#00b894;">&#10004;</span></div>
-            <div class="delta pos">+${{((m.service_level-m.actual_service_level)*100).toFixed(2)}}pp vs real</div>
+            <div class="delta pos">+${((m.service_level-m.actual_service_level)*100).toFixed(2)}pp vs real</div>
         </div>
         <div class="kpi-card purple">
             <div class="label">Estoque Medio</div>
-            <div class="value">R$ ${{m.avg_inventory_value.toFixed(2)}}</div>
-            <div class="sub">Real: R$ ${{m.actual_avg_inventory_value.toFixed(2)}}</div>
-            <div class="delta ${{delta > 0.01 ? 'neg' : 'pos'}}">${{delta > 0.01 ? '+' : ''}}R$ ${{Math.abs(delta).toFixed(2)}} vs real</div>
+            <div class="value">R$ ${m.avg_inventory_value.toFixed(2)}</div>
+            <div class="sub">Real: R$ ${m.actual_avg_inventory_value.toFixed(2)}</div>
+            <div class="delta ${delta > 0.01 ? 'neg' : 'pos'}">${delta > 0.01 ? '+' : ''}R$ ${Math.abs(delta).toFixed(2)} vs real</div>
         </div>
         <div class="kpi-card orange">
             <div class="label">Custo de Reposicao</div>
-            <div class="value">R$ ${{m.total_ordering_cost.toFixed(2)}}</div>
-            <div class="sub">${{m.total_orders}} pedidos</div>
+            <div class="value">R$ ${m.total_ordering_cost.toFixed(2)}</div>
+            <div class="sub">${m.total_orders} pedidos</div>
         </div>
         <div class="kpi-card teal">
             <div class="label">Vendas Perdidas</div>
-            <div class="value">${{m.total_lost_sales_units}} un</div>
-            <div class="sub">R$ ${{m.total_lost_sales_value.toFixed(2)}}</div>
+            <div class="value">${m.total_lost_sales_units} un</div>
+            <div class="sub">R$ ${m.total_lost_sales_value.toFixed(2)}</div>
         </div>
         <div class="kpi-card blue">
             <div class="label">Demanda vs Forecast</div>
-            <div class="value">${{m.total_demand}} / ${{m.total_forecast.toFixed(0)}} un</div>
-            <div class="sub">Forecast ${{overForecast}}% acima</div>
+            <div class="value">${m.total_demand} / ${m.total_forecast.toFixed(0)} un</div>
+            <div class="sub">Forecast ${overForecast}% acima</div>
         </div>
     `;
 
@@ -275,12 +275,12 @@ function drawOverview() {{
     var wWeeks = WEEKLY_DATA.map(d => 'W' + d.week);
     var wLost = WEEKLY_DATA.map(d => d.lost);
 
-    var wTrace1 = {{ x: wWeeks, y: wDemand, type: 'bar', name: 'Demanda Real', marker: {{ color: '#302b63' }} }};
-    var wTrace2 = {{ x: wWeeks, y: wForecast, type: 'scatter', name: 'Forecast', mode: 'lines+markers', line: {{ color: '#e17055', width: 2 }}, marker: {{ size: 6 }} }};
-    Plotly.newPlot('chart-weekly', [wTrace1, wTrace2], {{
-        title: 'Demanda vs Forecast Semanal', margin: {{ t:40, r:20, b:40, l:40 }},
-        barmode: 'group', legend: {{ orientation:'h', y:1.1 }},
-    }}, {{ responsive: true }});
+    var wTrace1 = { x: wWeeks, y: wDemand, type: 'bar', name: 'Demanda Real', marker: { color: '#302b63' } };
+    var wTrace2 = { x: wWeeks, y: wForecast, type: 'scatter', name: 'Forecast', mode: 'lines+markers', line: { color: '#e17055', width: 2 }, marker: { size: 6 } };
+    Plotly.newPlot('chart-weekly', [wTrace1, wTrace2], {
+        title: 'Demanda vs Forecast Semanal', margin: { t:40, r:20, b:40, l:40 },
+        barmode: 'group', legend: { orientation:'h', y:1.1 },
+    }, { responsive: true });
 
     // Promo comparison
     var pLabels = PROMO_DATA.map(d => d.is_promo ? 'Com Promocao' : 'Sem Promocao');
@@ -288,26 +288,26 @@ function drawOverview() {{
     var pForecast = PROMO_DATA.map(d => d.forecast);
     var pDays = PROMO_DATA.map(d => d.days + ' dias');
     Plotly.newPlot('chart-promo', [
-        {{ x: pLabels, y: pDemand, type: 'bar', name: 'Demanda', marker: {{ color: '#00b894' }}, text: pDays, textposition:'auto' }},
-        {{ x: pLabels, y: pForecast, type: 'bar', name: 'Forecast', marker: {{ color: '#e17055', opacity:0.6 }} }}
-    ], {{
-        title: 'Impacto Promocional', barmode:'group', margin: {{ t:40, r:20, b:40, l:40 }},
-        legend: {{ orientation:'h', y:1.1 }},
-    }}, {{ responsive: true }});
+        { x: pLabels, y: pDemand, type: 'bar', name: 'Demanda', marker: { color: '#00b894' }, text: pDays, textposition:'auto' },
+        { x: pLabels, y: pForecast, type: 'bar', name: 'Forecast', marker: { color: '#e17055', opacity:0.6 } }
+    ], {
+        title: 'Impacto Promocional', barmode:'group', margin: { t:40, r:20, b:40, l:40 },
+        legend: { orientation:'h', y:1.1 },
+    }, { responsive: true });
 
     // Insight
     document.getElementById('insight-overview').innerHTML = `
         <h3>Resumo Executivo</h3>
         <p>Politica <b>(s,S)</b> com segmentacao ABC ponderada por demanda (thresholds 70/88).<br>
         <b>NEOSORO</b> (70% da demanda) protegido com z=1,28 — zero ruptura.<br>
-        <b>Estoque R$${{m.avg_inventory_value.toFixed(0)}}/dia</b> — ${{Math.abs(delta).toFixed(0) > 0 && delta < 0 ? Math.abs(delta).toFixed(0)+' abaixo' : Math.abs(delta).toFixed(0)+' acima'}} da operacao real.<br>
-        <b>Forecast</b> ${{m.total_forecast.toFixed(0)}} vs ${{m.total_demand}} un reais — superestimacao de ${{overForecast}}% (antes era 51%).<br>
-        <b>SL ${{slPct}}%</b> — acima da meta de 99,5% e do target oficial de 92%.</p>
+        <b>Estoque R$${m.avg_inventory_value.toFixed(0)}/dia</b> — ${Math.abs(delta).toFixed(0) > 0 && delta < 0 ? Math.abs(delta).toFixed(0)+' abaixo' : Math.abs(delta).toFixed(0)+' acima'} da operacao real.<br>
+        <b>Forecast</b> ${m.total_forecast.toFixed(0)} vs ${m.total_demand} un reais — superestimacao de ${overForecast}% (antes era 51%).<br>
+        <b>SL ${slPct}%</b> — acima da meta de 99,5% e do target oficial de 92%.</p>
     `;
-}}
+}
 
 // ============ ABC ============
-function drawABC() {{
+function drawABC() {
     var abc = ABC_DATA;
     var labels = abc.map(d => d.label);
     var demand = abc.map(d => d.demand);
@@ -316,38 +316,38 @@ function drawABC() {{
     var invVals = abc.map(d => d.inv_value);
 
     Plotly.newPlot('chart-abc-pareto', [
-        {{ x: labels, y: demand, type: 'bar', name: 'Demanda (un)', marker: {{ color: colors }}, yaxis:'y' }},
-        {{ x: labels, y: cum, type: 'scatter', name: '% Acumulada', mode:'lines+markers', yaxis:'y2', line: {{ color:'#0984e3', width:2 }} }}
-    ], {{
-        title: 'Curva ABC (Demanda Volume)', margin: {{ t:40, r:50, b:80, l:40 }},
-        xaxis: {{ tickangle:-45, automargin:true }},
-        yaxis: {{ title:'Demanda (un)' }},
-        yaxis2: {{ title:'% Acum.', overlaying:'y', side:'right', range:[0,105] }},
-        legend: {{ orientation:'h', y:1.15 }},
+        { x: labels, y: demand, type: 'bar', name: 'Demanda (un)', marker: { color: colors }, yaxis:'y' },
+        { x: labels, y: cum, type: 'scatter', name: '% Acumulada', mode:'lines+markers', yaxis:'y2', line: { color:'#0984e3', width:2 } }
+    ], {
+        title: 'Curva ABC (Demanda Volume)', margin: { t:40, r:50, b:80, l:40 },
+        xaxis: { tickangle:-45, automargin:true },
+        yaxis: { title:'Demanda (un)' },
+        yaxis2: { title:'% Acum.', overlaying:'y', side:'right', range:[0,105] },
+        legend: { orientation:'h', y:1.15 },
         shapes: [
-            {{ type:'line', x0:-0.5, x1:labels.length, y0:70, y1:70, yref:'y2', line:{{ dash:'dash', color:'#00b894' }} }},
-            {{ type:'line', x0:-0.5, x1:labels.length, y0:88, y1:88, yref:'y2', line:{{ dash:'dash', color:'#fdcb6e' }} }},
+            { type:'line', x0:-0.5, x1:labels.length, y0:70, y1:70, yref:'y2', line:{ dash:'dash', color:'#00b894' } },
+            { type:'line', x0:-0.5, x1:labels.length, y0:88, y1:88, yref:'y2', line:{ dash:'dash', color:'#fdcb6e' } },
         ]
-    }}, {{ responsive: true }});
+    }, { responsive: true });
 
-    Plotly.newPlot('chart-abc-bubble', [{{
+    Plotly.newPlot('chart-abc-bubble', [{
         x: demand, y: invVals,
         mode: 'markers+text',
         type: 'scatter',
         text: labels,
         textposition: 'top center',
-        textfont: {{ size:9 }},
-        marker: {{
+        textfont: { size:9 },
+        marker: {
             size: demand.map(d => Math.max(Math.sqrt(d)*6, 8)),
             color: colors,
             opacity:0.7,
-        }},
-    }}], {{
-        title: 'Demanda vs Estoque por SKU', margin: {{ t:40, r:20, b:40, l:50 }},
-        xaxis: {{ title:'Demanda (un)' }},
-        yaxis: {{ title:'Estoque Medio (R$)' }},
+        },
+    }], {
+        title: 'Demanda vs Estoque por SKU', margin: { t:40, r:20, b:40, l:50 },
+        xaxis: { title:'Demanda (un)' },
+        yaxis: { title:'Estoque Medio (R$)' },
         showlegend: false,
-    }}, {{ responsive: true }});
+    }, { responsive: true });
 
     var aCount = SKU_DATA.filter(d => d.abc_class === 'A').length;
     var bCount = SKU_DATA.filter(d => d.abc_class === 'B').length;
@@ -359,81 +359,81 @@ function drawABC() {{
     document.getElementById('kpi-abc').innerHTML = `
         <div class="kpi-card green">
             <div class="label">Classe A (z=1,28)</div>
-            <div class="value">${{aCount}} pares</div>
-            <div class="sub">${{aDem}} un (${{(aDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+            <div class="value">${aCount} pares</div>
+            <div class="sub">${aDem} un (${(aDem/METRICS.total_demand*100).toFixed(0)}%)</div>
         </div>
         <div class="kpi-card" style="border-left-color:#fdcb6e">
             <div class="label">Classe B (z=0,84)</div>
-            <div class="value">${{bCount}} pares</div>
-            <div class="sub">${{bDem}} un (${{(bDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+            <div class="value">${bCount} pares</div>
+            <div class="sub">${bDem} un (${(bDem/METRICS.total_demand*100).toFixed(0)}%)</div>
         </div>
         <div class="kpi-card orange">
             <div class="label">Classe C (z=0,00)</div>
-            <div class="value">${{cCount}} pares</div>
-            <div class="sub">${{cDem}} un (${{(cDem/METRICS.total_demand*100).toFixed(0)}}%)</div>
+            <div class="value">${cCount} pares</div>
+            <div class="sub">${cDem} un (${(cDem/METRICS.total_demand*100).toFixed(0)}%)</div>
         </div>
     `;
-}}
+}
 
 // ============ LOJAS ============
-function drawLojas() {{
+function drawLojas() {
     var l841 = LOJA_DATA.find(d => d.location === 841);
     var l1314 = LOJA_DATA.find(d => d.location === 1314);
 
-    Plotly.newPlot('chart-lojas-radar', [{{
+    Plotly.newPlot('chart-lojas-radar', [{
         type: 'scatterpolar',
         r: [l841.demand/METRICS.total_demand*100, l841.orders, l841.lost_units, (l841.avg_inv/l841.avg_actual_inv-1)*100, l1314.demand/METRICS.total_demand*100, l1314.orders, l1314.lost_units, (l1314.avg_inv/l1314.avg_actual_inv-1)*100],
         theta: ['% Demanda','Pedidos','Lost Sales','Var Estoque','% Demanda','Pedidos','Lost Sales','Var Estoque'],
         fill: 'toself',
         name: 'Metricas',
-    }}], {{
-        title: 'Comparativo por Loja', polar: {{ radialaxis: {{ visible:true }} }}, margin: {{ t:40, r:20, b:40, l:20 }},
-    }}, {{ responsive: true }});
+    }], {
+        title: 'Comparativo por Loja', polar: { radialaxis: { visible:true } }, margin: { t:40, r:20, b:40, l:20 },
+    }, { responsive: true });
 
     Plotly.newPlot('chart-lojas-bar', [
-        {{ x: ['Loja 841','Loja 1314'], y: [l841.demand, l1314.demand], type:'bar', name:'Demanda', marker:{{ color:'#302b63' }} }},
-        {{ x: ['Loja 841','Loja 1314'], y: [l841.avg_inv, l1314.avg_inv], type:'bar', name:'Estoque (R$)', marker:{{ color:'#00b894', opacity:0.6 }} }},
-    ], {{
-        title: 'Demanda vs Estoque', margin: {{ t:40, r:20, b:40, l:50 }},
-        barmode: 'group', legend: {{ orientation:'h', y:1.1 }},
-    }}, {{ responsive: true }});
+        { x: ['Loja 841','Loja 1314'], y: [l841.demand, l1314.demand], type:'bar', name:'Demanda', marker:{ color:'#302b63' } },
+        { x: ['Loja 841','Loja 1314'], y: [l841.avg_inv, l1314.avg_inv], type:'bar', name:'Estoque (R$)', marker:{ color:'#00b894', opacity:0.6 } },
+    ], {
+        title: 'Demanda vs Estoque', margin: { t:40, r:20, b:40, l:50 },
+        barmode: 'group', legend: { orientation:'h', y:1.1 },
+    }, { responsive: true });
 
     var hero1 = SIM_DATA.filter(d => d.product === 18064 && d.location === 1314);
     Plotly.newPlot('chart-lojas-hero', [
-        {{ x: hero1.map(d => d.date), y: hero1.map(d => d.ending_inventory), type:'scatter', name:'Estoque Simulado', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' }},
-        {{ x: hero1.map(d => d.date), y: hero1.map(d => d.actual_balance||0), type:'scatter', name:'Estoque Real', mode:'lines', line:{{ color:'#0984e3', width:2, dash:'dash' }} }},
-    ], {{
-        title: 'NEOSORO 1314 — Estoque Dia a Dia', margin: {{ t:40, r:20, b:40, l:50 }},
-        legend: {{ orientation:'h', y:1.1 }},
-        xaxis: {{ title:'Data' }}, yaxis: {{ title:'Unidades' }},
-    }}, {{ responsive: true }});
-}}
+        { x: hero1.map(d => d.date), y: hero1.map(d => d.ending_inventory), type:'scatter', name:'Estoque Simulado', mode:'lines', line:{ color:'#00b894', width:2 }, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' },
+        { x: hero1.map(d => d.date), y: hero1.map(d => d.actual_balance||0), type:'scatter', name:'Estoque Real', mode:'lines', line:{ color:'#0984e3', width:2, dash:'dash' } },
+    ], {
+        title: 'NEOSORO 1314 — Estoque Dia a Dia', margin: { t:40, r:20, b:40, l:50 },
+        legend: { orientation:'h', y:1.1 },
+        xaxis: { title:'Data' }, yaxis: { title:'Unidades' },
+    }, { responsive: true });
+}
 
 // ============ SKU DETAIL ============
-function drawSKUs() {{
+function drawSKUs() {
     var risk = REV_RISK_DATA;
     Plotly.newPlot('chart-rev-risk', [
-        {{ x: risk.map(d => d.product_name), y: risk.map(d => d.revenue), type:'bar',
-           marker: {{ color: risk.map(d => d.stockout > 0 ? '#e17055' : '#00b894') }},
+        { x: risk.map(d => d.product_name), y: risk.map(d => d.revenue), type:'bar',
+           marker: { color: risk.map(d => d.stockout > 0 ? '#e17055' : '#00b894') },
            text: risk.map(d => 'Loja '+d.location + (d.stockout>0 ? ' (ruptura)' : '')),
-        }}
-    ], {{
-        title: 'Top 10 SKU-Loja por Receita', margin: {{ t:40, r:20, b:80, l:50 }},
-        xaxis: {{ tickangle:-45, automargin:true }},
-        yaxis: {{ title:'Receita (R$)' }},
-    }}, {{ responsive: true }});
+        }
+    ], {
+        title: 'Top 10 SKU-Loja por Receita', margin: { t:40, r:20, b:80, l:50 },
+        xaxis: { tickangle:-45, automargin:true },
+        yaxis: { title:'Receita (R$)' },
+    }, { responsive: true });
 
     var table = document.getElementById('table-skus');
     var skus = SKU_DATA.sort((a,b) => b.total_actual_demand - a.total_actual_demand);
     var rows = skus.map(d => `
         <tr>
-            <td>${{d.product}}</td><td>${{d.product_name}}</td><td>Loja ${{d.location}}</td>
-            <td><span class="badge-sl ${{d.abc_class}}">${{d.abc_class}}</span></td>
-            <td class="num">${{d.reorder_point_s}}</td><td class="num">${{d.order_up_to_S}}</td>
-            <td class="num">${{d.total_actual_demand}}</td>
-            <td class="num">${{d.service_level ? (d.service_level*100).toFixed(1)+'%' : '-'}}</td>
-            <td class="num">R$${{d.avg_inventory_value.toFixed(0)}}</td>
-            <td class="num">${{d.total_lost_sales_units}}</td>
+            <td>${d.product}</td><td>${d.product_name}</td><td>Loja ${d.location}</td>
+            <td><span class="badge-sl ${d.abc_class}">${d.abc_class}</span></td>
+            <td class="num">${d.reorder_point_s}</td><td class="num">${d.order_up_to_S}</td>
+            <td class="num">${d.total_actual_demand}</td>
+            <td class="num">${d.service_level ? (d.service_level*100).toFixed(1)+'%' : '-'}</td>
+            <td class="num">R$${d.avg_inventory_value.toFixed(0)}</td>
+            <td class="num">${d.total_lost_sales_units}</td>
         </tr>
     `).join('');
     table.innerHTML = `<thead><tr>
@@ -441,62 +441,62 @@ function drawSKUs() {{
         <th class="num">s</th><th class="num">S</th>
         <th class="num">Demanda</th><th class="num">SL</th>
         <th class="num">Estoque</th><th class="num">Perdido</th>
-    </tr></thead><tbody>${{rows}}</tbody>`;
-}}
+    </tr></thead><tbody>${rows}</tbody>`;
+}
 
 // ============ SIMULATION ============
-function drawSimulation() {{
+function drawSimulation() {
     var hero1 = SIM_DATA.filter(d => d.product === 18064 && d.location === 1314);
     var hero2 = SIM_DATA.filter(d => d.product === 18064 && d.location === 841);
 
-    function simChart(id, data, title) {{
+    function simChart(id, data, title) {
         Plotly.newPlot(id, [
-            {{ x: data.map(d => d.date), y: data.map(d => d.ending_inventory), type:'scatter', name:'Estoque', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.08)' }},
-            {{ x: data.map(d => d.date), y: data.map(d => d.actual_demand), type:'bar', name:'Demanda', marker:{{ color:'#302b63', opacity:0.3 }}, yaxis:'y2' }},
-            {{ x: data.map(d => d.date), y: data.map(d => d.reorder_point_s || d.reorder_point), type:'scatter', name:'s (ponto de pedido)', mode:'lines', line:{{ color:'#fdcb6e', width:1, dash:'dash' }} }},
-        ], {{
-            title: title, margin: {{ t:40, r:50, b:40, l:50 }},
-            xaxis: {{ title:'Data' }}, yaxis: {{ title:'Unidades' }},
-            yaxis2: {{ title:'Demanda', overlaying:'y', side:'right', showgrid:false }},
-            legend: {{ orientation:'h', y:1.15 }},
-        }}, {{ responsive: true }});
-    }}
+            { x: data.map(d => d.date), y: data.map(d => d.ending_inventory), type:'scatter', name:'Estoque', mode:'lines', line:{ color:'#00b894', width:2 }, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.08)' },
+            { x: data.map(d => d.date), y: data.map(d => d.actual_demand), type:'bar', name:'Demanda', marker:{ color:'#302b63', opacity:0.3 }, yaxis:'y2' },
+            { x: data.map(d => d.date), y: data.map(d => d.reorder_point_s || d.reorder_point), type:'scatter', name:'s (ponto de pedido)', mode:'lines', line:{ color:'#fdcb6e', width:1, dash:'dash' } },
+        ], {
+            title: title, margin: { t:40, r:50, b:40, l:50 },
+            xaxis: { title:'Data' }, yaxis: { title:'Unidades' },
+            yaxis2: { title:'Demanda', overlaying:'y', side:'right', showgrid:false },
+            legend: { orientation:'h', y:1.15 },
+        }, { responsive: true });
+    }
 
     simChart('chart-hero1', hero1, 'NEOSORO 1314 (Classe A, z=1.28)');
     simChart('chart-hero2', hero2, 'NEOSORO 841 (Classe B, z=0.84)');
 
-    var daily = {{}};
-    SIM_DATA.forEach(d => {{
+    var daily = {};
+    SIM_DATA.forEach(d => {
         var day = d.date.toString().slice(0,10);
-        if (!daily[day]) daily[day] = {{ inv:0, dem:0, lost:0 }};
+        if (!daily[day]) daily[day] = { inv:0, dem:0, lost:0 };
         daily[day].inv += d.simulated_inventory_value || 0;
         daily[day].dem += d.actual_demand || 0;
         daily[day].lost += d.lost_sales_units || 0;
-    }});
+    });
     var keys = Object.keys(daily).sort();
     Plotly.newPlot('chart-daily-agg', [
-        {{ x: keys, y: keys.map(k => daily[k].inv), type:'scatter', name:'Estoque (R$)', mode:'lines', line:{{ color:'#00b894', width:2 }}, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' }},
-        {{ x: keys, y: keys.map(k => daily[k].dem), type:'scatter', name:'Demanda', mode:'lines', line:{{ color:'#e17055', width:1 }}, yaxis:'y2' }},
-    ], {{
-        title: 'Estoque Total Agregado Diario', margin: {{ t:40, r:50, b:40, l:50 }},
-        xaxis: {{ title:'Data' }}, yaxis: {{ title:'R$' }},
-        yaxis2: {{ title:'Unidades', overlaying:'y', side:'right', showgrid:false }},
-        legend: {{ orientation:'h', y:1.15 }},
-    }}, {{ responsive: true }});
-}}
+        { x: keys, y: keys.map(k => daily[k].inv), type:'scatter', name:'Estoque (R$)', mode:'lines', line:{ color:'#00b894', width:2 }, fill:'tozeroy', fillcolor:'rgba(0,180,140,0.1)' },
+        { x: keys, y: keys.map(k => daily[k].dem), type:'scatter', name:'Demanda', mode:'lines', line:{ color:'#e17055', width:1 }, yaxis:'y2' },
+    ], {
+        title: 'Estoque Total Agregado Diario', margin: { t:40, r:50, b:40, l:50 },
+        xaxis: { title:'Data' }, yaxis: { title:'R$' },
+        yaxis2: { title:'Unidades', overlaying:'y', side:'right', showgrid:false },
+        legend: { orientation:'h', y:1.15 },
+    }, { responsive: true });
+}
 
 // ============ CONFIG ============
-function drawConfig() {{
+function drawConfig() {
     var c = CONFIG;
     document.getElementById('param-grid').innerHTML = `
-        <div class="param-card"><div class="param-label">Classificacao ABC</div><div class="param-value" style="font-size:14px;">${{c.abc_classification}}</div></div>
-        <div class="param-card"><div class="param-label">z Classe A</div><div class="param-value">${{c.z_by_class.A}}</div></div>
-        <div class="param-card"><div class="param-label">z Classe B</div><div class="param-value">${{c.z_by_class.B}}</div></div>
-        <div class="param-card"><div class="param-label">z Classe C</div><div class="param-value">${{c.z_by_class.C}}</div></div>
-        <div class="param-card"><div class="param-label">z Uniforme (base)</div><div class="param-value">${{c.z_uniform}}</div></div>
-        <div class="param-card"><div class="param-label">Review Days</div><div class="param-value">${{c.review_days}}d</div></div>
-        <div class="param-card"><div class="param-label">Piso Reorder</div><div class="param-value">${{c.reorder_quantile}}</div></div>
-        <div class="param-card"><div class="param-label">Piso Order-Up-To</div><div class="param-value">${{c.order_up_to_quantile}}</div></div>
+        <div class="param-card"><div class="param-label">Classificacao ABC</div><div class="param-value" style="font-size:14px;">${c.abc_classification}</div></div>
+        <div class="param-card"><div class="param-label">z Classe A</div><div class="param-value">${c.z_by_class.A}</div></div>
+        <div class="param-card"><div class="param-label">z Classe B</div><div class="param-value">${c.z_by_class.B}</div></div>
+        <div class="param-card"><div class="param-label">z Classe C</div><div class="param-value">${c.z_by_class.C}</div></div>
+        <div class="param-card"><div class="param-label">z Uniforme (base)</div><div class="param-value">${c.z_uniform}</div></div>
+        <div class="param-card"><div class="param-label">Review Days</div><div class="param-value">${c.review_days}d</div></div>
+        <div class="param-card"><div class="param-label">Piso Reorder</div><div class="param-value">${c.reorder_quantile}</div></div>
+        <div class="param-card"><div class="param-label">Piso Order-Up-To</div><div class="param-value">${c.order_up_to_quantile}</div></div>
     `;
 
     document.getElementById('insight-config').innerHTML = `
@@ -508,26 +508,26 @@ function drawConfig() {{
         <b>Pisos Empiricos:</b> Quantis da demanda historica sazonal para evitar valores muito baixos.</p>
     `;
 
-    if (TUNE_DATA.length > 0) {{
+    if (TUNE_DATA.length > 0) {
         var tz = [...new Set(TUNE_DATA.map(d => d.z_value))].sort();
         var trd = [...new Set(TUNE_DATA.map(d => d.review_days))].sort();
-        var heatmap = trd.map(rd => {{
-            return tz.map(zv => {{
+        var heatmap = trd.map(rd => {
+            return tz.map(zv => {
                 var match = TUNE_DATA.find(d => d.z_value === zv && d.review_days === rd);
                 return match ? match.objective : null;
-            }});
-        }});
-        Plotly.newPlot('chart-tune', [{{
+            });
+        });
+        Plotly.newPlot('chart-tune', [{
             z: heatmap, x: tz, y: trd, type:'heatmap',
             colorscale: [[0,'#00b894'],[0.5,'#fdcb6e'],[1,'#e17055']],
             text: heatmap.map(r => r.map(v => v ? v.toFixed(1) : '-')),
-            texttemplate: '%{{text}}', textfont: {{ size:11 }},
-        }}], {{
-            title: 'Grid Search: Objective por (z, review_days)', margin: {{ t:40, r:20, b:40, l:50 }},
-            xaxis: {{ title:'z value' }}, yaxis: {{ title:'review_days' }},
-        }}, {{ responsive: true }});
-    }}
-}}
+            texttemplate: '%{text}', textfont: { size:11 },
+        }], {
+            title: 'Grid Search: Objective por (z, review_days)', margin: { t:40, r:20, b:40, l:50 },
+            xaxis: { title:'z value' }, yaxis: { title:'review_days' },
+        }, { responsive: true });
+    }
+}
 
 // ============ INIT ============
 drawOverview();
