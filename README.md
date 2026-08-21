@@ -236,6 +236,12 @@ python -m pytest tests -q
 
 Também é possível executar os grupos separadamente:
 
+Ao final, o pipeline imprime os caminhos da política exportada (`policy.csv`) e do relatório (`index.html`).
+
+## Testes
+
+Suíte abrangente cobrindo unitários, integração, regressão, correção temporal e cenários adversariais — incluindo caos: demanda explosiva/zerada, estoque inicial negativo, lead time extremo/zero, ruptura prolongada, censura de 100%, pedidos simultâneos e garantias invariantes (ex.: sempre `S > s`).
+
 ```bash
 python -m pytest tests/test_comprehensive.py -v
 python -m pytest tests/test_chaos.py -v
@@ -278,3 +284,32 @@ Os testes cobrem cálculos de lote, forecast, classificação ABC, política `(s
 ## Licença
 
 Este projeto está disponível sob a licença MIT. Consulte o arquivo [`LICENSE`](LICENSE).
+
+## Saídas geradas
+
+| Arquivo | Conteúdo |
+|---|---|
+| `policy.csv` | Política final: `product, location, reorder_point_s, order_up_to_S` |
+| `policy_enriched.csv` | Política completa com z, review, classe ABC, pisos empíricos/sazonais |
+| `simulation_daily.csv` | Simulação dia a dia (estoque, pedidos, vendas, rupturas) |
+| `daily_forecast_static.csv` / `daily_forecast_rolling.csv` | Forecast diário nos dois modos |
+| `sku_metrics.csv` | KPIs por SKU-loja |
+| `overall_metrics.json` | Métricas agregadas vs. operação real |
+| `best_validation_params.json` | Melhores parâmetros globais da validação (Q3/2024) |
+| `local_overrides.csv` / `local_tuning_search.csv` | Overrides locais e busca de calibração |
+| `run_metadata.json` | Metadados da execução (horizontes, quantis, z por classe) |
+| `index.html`, `dashboard.html`, `products/*.html` | Relatórios HTML |
+
+## Roadmap
+
+Da simulação à operação real, em três passos:
+
+1. 🚚 **Cadeia completa: Fornecedor → CD → Loja** — os dados já existem (lead times de 5–38 dias, lotes mínimos, ciclos semanal/mensal). Modelar o elo Fornecedor→CD reduz o custo de pedido e fecha a cadeia do topo ao cliente.
+2. 📱 **Dashboard ao vivo para o gerente** (~80% pronto) — já são 58 páginas HTML, uma por SKU-loja, com estoque, forecast, pedidos e narrativa de risco. Próximo passo: o gerente abre no celular e vê *"NEOSORO em 190 unidades — peça em 7 dias"*.
+3. ⚙️ **Reposição automática via ERP** — o simulador já toma a decisão de pedido sozinho. Falta conectar ao ERP da farmácia: quando o estoque bate em `s`, o sistema emite o pedido. Sem planilha, sem e-mail.
+
+**Escala para a rede inteira:** 29 SKUs → 5.000+ SKUs · 2 lojas → 6+ lojas · 1 categoria → todas as categorias.
+
+---
+
+Apresentação: [Canva](https://www.canva.com/design/DAHKgqxWLmY/CVNnVVRHbfio3tMMeRxciA/edit)
